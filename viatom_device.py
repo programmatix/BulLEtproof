@@ -28,6 +28,7 @@ class ViatomDevice:
         self.client = client
         self.logger = logging.getLogger(__name__)
         self.data_queue = data_queue
+        self.future_request_more_data = None
 
     def data_handler(self, sender, data):
         timestamp = int(time.time() * 1e9)  # nanosecond precision
@@ -66,14 +67,14 @@ class ViatomDevice:
                     timestamp=timestamp
                 ))
 
-            # if self.future_request_more_data:
-            #     self.future_request_more_data.cancel()
+            if self.future_request_more_data:
+                self.future_request_more_data.cancel()
 
-            # self.future_request_more_data = asyncio.create_task(self.request_more_data())
+            self.future_request_more_data = asyncio.create_task(self.request_more_data())
 
-    # async def request_more_data(self):
-    #     await asyncio.sleep(2)  # Wait for 2 seconds
-    #     await self.client.write_gatt_char(self.write_char, ViatomConstants.WRITE_BYTES)
+    async def request_more_data(self):
+        await asyncio.sleep(2)  # Wait for 2 seconds
+        await self.client.write_gatt_char(self.write_char, ViatomConstants.WRITE_BYTES)
 
     async def subscribe(self):
         service = self.client.services.get_service(ViatomConstants.SERVICE_UUID)
