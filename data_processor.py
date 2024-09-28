@@ -5,6 +5,7 @@ import json
 
 from ble_command import SharedData
 from core_device import CoreTempData
+from polar_device import PolarHRData
 from viatom_device import ViatomData
 
 class DataProcessor:
@@ -37,6 +38,9 @@ class DataProcessor:
                 elif isinstance(data, ViatomData):
                     self.process_viatom_for_influx(data)
                     self.process_viatom_for_mqtt(data)
+                elif isinstance(data, PolarHRData):
+                    self.process_polar_for_influx(data)
+                    self.process_polar_for_mqtt(data)
             except Exception as e:
                 self.logger.error(f"Error processing data: {e}", exc_info=True)
 
@@ -97,6 +101,47 @@ class DataProcessor:
         
         mqtt_message = {
             "topic": "xl/viatom/data",
+            "payload": json.dumps(mqtt_data)
+        }
+        self.mqtt_queue.put(mqtt_message)
+
+
+    def process_polar_for_influx(self, polar_data: PolarHRData):
+        influx_data = {
+            "measurement": "android_hr",
+            "tags": {
+                "model": "Minix",
+                "source": "Polar"
+            },
+            "fields": {
+                "hr": polar_data.hr,
+                "hrv": polar_data.hrv_rmssd_very_recent,
+                "hrvRMSSDVeryRecent": polar_data.hrv_rmssd_very_recent,
+                "hrvRMSSDSomewhatRecent": polar_data.hrv_rmssd_somewhat_recent,
+                "hrvRMSSDLessRecent": polar_data.hrv_rmssd_less_recent,
+                "hrvSDVeryRecent": polar_data.hrv_sd_very_recent,
+                "hrvSDSomewhatRecent": polar_data.hrv_sd_somewhat_recent,
+                "hrvSDLessRecent": polar_data.hrv_sd_less_recent,
+                "rrIntervals": ','.join(map(str, polar_data.rr_intervals)),
+            },
+            "time": polar_data.timestamp
+        }
+        self.influx_queue.put(influx_data)
+
+    def process_polar_for_mqtt(self, polar_data: PolarHRData):
+        mqtt_data = {
+            "hr": polar_data.hr,
+            "hrvRMSSDVeryRecent": polar_data.hrv_rmssd_very_recent,
+            "hrvRMSSDSomewhatRecent": polar_data.hrv_rmssd_somewhat_recent,
+            "hrvRMSSDLessRecent": polar_data.hrv_rmssd_less_recent,
+            "hrvSDVeryRecent": polar_data.hrv_sd_very_recent,
+            "hrvSDSomewhatRecent": polar_data.hrv_sd_somewhat_recent,
+            "hrvSDLessRecent": polar_data.hrv_sd_less_recent,
+            "rrIntervals": ','.join(map(str, polar_data.rr_intervals)),
+        }
+        
+        mqtt_message = {
+            "topic": "xl/polar/hr",
             "payload": json.dumps(mqtt_data)
         }
         self.mqtt_queue.put(mqtt_message)

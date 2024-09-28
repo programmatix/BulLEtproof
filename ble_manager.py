@@ -98,7 +98,7 @@ class BLEManager:
         self.max_retries = 3
         self.connection_timeout = 30
         self.scheduled_tasks = []
-        self.data_inactivity_timeout = 5  # 60 seconds
+        self.data_inactivity_timeout = 60
         # self.data_received_queue = asyncio.Queue()
         # self.data_processing_thread = threading.Thread(target=self.process_device_data_thread, daemon=True)
         # self.data_processing_thread.start()

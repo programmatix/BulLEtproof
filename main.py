@@ -73,8 +73,10 @@ async def startup_event():
         asyncio.create_task(ble_manager.run())
         viatom_device_address = os.getenv('VIATOM_DEVICE_ADDRESS')
         core_device_address = os.getenv('CORE_DEVICE_ADDRESS')
-        await ble_manager.queue_connect_to_specific_device(viatom_device_address)
-        await ble_manager.queue_connect_to_specific_device(core_device_address)
+        polar_device_address = os.getenv('POLAR_DEVICE_ADDRESS')
+        # await ble_manager.queue_connect_to_specific_device(viatom_device_address)
+        # await ble_manager.queue_connect_to_specific_device(core_device_address)
+        await ble_manager.queue_connect_to_specific_device(polar_device_address)
         startup_complete = True
 
 @app.on_event("shutdown")
