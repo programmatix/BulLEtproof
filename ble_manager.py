@@ -10,12 +10,9 @@ from dotenv import load_dotenv
 from core_device import CoreDevice
 from polar_device import PolarDevice
 from viatom_device import ViatomDevice
+from ble_command import BLECommand
 
 load_dotenv()
-
-class BLECommand:
-    async def execute(self, manager):
-        pass
 
 class ScanCommand(BLECommand):
     async def execute(self, manager):
@@ -89,16 +86,21 @@ class BLEManager:
 
     async def run(self):
         while True:
-            command = await self.command_queue.get()
-            await command.execute(self)
-            self.command_queue.task_done()
-
-            # Check and execute any scheduled tasks that are due
+            # Process any due scheduled tasks
             current_time = asyncio.get_event_loop().time()
             due_tasks = [task for task in self.scheduled_tasks if task[0] <= current_time]
             for task in due_tasks:
                 self.scheduled_tasks.remove(task)
                 await self.command_queue.put(task[1])
+
+            # Process commands from the queue
+            try:
+                command = await asyncio.wait_for(self.command_queue.get(), timeout=1.0)
+                await command.execute(self)
+                self.command_queue.task_done()
+            except asyncio.TimeoutError:
+                # No commands in the queue, continue to next iteration
+                await asyncio.sleep(0.1)
 
     # async def queue_scan_and_connect_devices(self):
     #     await self.command_queue.put(ScanCommand())
@@ -117,7 +119,7 @@ class BLEManager:
         device_name = self.get_device_name(address)
         
         if "Checkme" in device_name:
-            device = ViatomDevice(client, self.data_queue)
+            device = ViatomDevice(client, self.data_queue, self)
         elif "Polar" in device_name:
             device = PolarDevice(client, self.data_queue)
         elif "CORE" in device_name:
@@ -142,7 +144,7 @@ class BLEManager:
             
             # Determine device type based on updated name or use CoreDevice as fallback
             if "Checkme" in device_name:
-                device = ViatomDevice(client, self.data_queue)
+                device = ViatomDevice(client, self.data_queue, self)
             elif "Polar" in device_name:
                 device = PolarDevice(client, self.data_queue)
             elif "CORE" in device_name:
@@ -151,7 +153,7 @@ class BLEManager:
                 if address == os.getenv('CORE_DEVICE_ADDRESS'): 
                     device = CoreDevice(client, self.data_queue)
                 elif address == os.getenv('VIATOM_DEVICE_ADDRESS'):
-                    device = ViatomDevice(client, self.data_queue)
+                    device = ViatomDevice(client, self.data_queue, self)
                 elif address == os.getenv('POLAR_DEVICE_ADDRESS'):
                     device = PolarDevice(client, self.data_queue)
                 else:

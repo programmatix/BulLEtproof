@@ -5,6 +5,7 @@ import time
 
 from bleak import BleakClient
 
+from ble_command import BLECommand
 from constants import UUIDs
 
 @dataclass
@@ -24,13 +25,14 @@ class ViatomConstants:
     WRITE_BYTES = bytearray([0xaa, 0x17, 0xe8, 0x00, 0x00, 0x00, 0x00, 0x1b])    
 
 class ViatomDevice:
-    def __init__(self, client: BleakClient, data_queue):
+    def __init__(self, client: BleakClient, data_queue, ble_manager):
         self.client = client
         self.logger = logging.getLogger(__name__)
         self.data_queue = data_queue
+        self.ble_manager = ble_manager
         self.future_request_more_data = None
 
-    def data_handler(self, sender, data):
+    async def data_handler(self, sender, data):
         timestamp = int(time.time() * 1e9)  # nanosecond precision
         self.logger.info(f"Received data from Viatom device: {data.hex()}")
         
@@ -70,35 +72,38 @@ class ViatomDevice:
             if self.future_request_more_data:
                 self.future_request_more_data.cancel()
 
-            self.future_request_more_data = asyncio.create_task(self.request_more_data())
+            await self.ble_manager.schedule_command(self.RequestMoreDataCommand(self), 2)
 
-    async def request_more_data(self):
-        await asyncio.sleep(2)  # Wait for 2 seconds
-        await self.client.write_gatt_char(self.write_char, ViatomConstants.WRITE_BYTES)
+    class RequestMoreDataCommand(BLECommand):
+        def __init__(self, viatom_device):
+            self.viatom_device = viatom_device
+
+        async def execute(self, manager):
+            await self.viatom_device.client.write_gatt_char(self.viatom_device.write_char, ViatomConstants.WRITE_BYTES)
 
     async def subscribe(self):
         service = self.client.services.get_service(ViatomConstants.SERVICE_UUID)
 
         self.write_char = service.get_characteristic(ViatomConstants.WRITE_UUID)
         self.notify_char = service.get_characteristic(ViatomConstants.NOTIFY_UUID)
-        self.subscribe_desc = self.notify_char.get_descriptor(ViatomConstants.CLIENT_CHARACTERISTIC_DESCRIPTOR_UUID)
 
         self.logger.info(f"Viatom service: {service}")
         self.logger.info(f"Viatom write char: {self.write_char}")
         self.logger.info(f"Viatom notify char: {self.notify_char}")
-        self.logger.info(f"Viatom subscribe desc: {self.subscribe_desc} {self.subscribe_desc.handle}")
 
         try:
             await self.client.start_notify(
                 ViatomConstants.NOTIFY_UUID,
                 self.data_handler
             )
+            self.logger.info("Notifications started successfully")
         except Exception as e:
             self.logger.error(f"Failed to start notifications: {e}")
             raise
 
         try:
             await self.client.write_gatt_char(self.write_char.handle, ViatomConstants.WRITE_BYTES, response=False)
+            self.logger.info("Write command sent successfully")
         except Exception as e:
             self.logger.error(f"Failed to write to characteristic: {e}")
             raise
