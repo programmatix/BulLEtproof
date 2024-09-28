@@ -1,0 +1,9 @@
+bleak
+fastapi
+uvicorn
+websockets
+pyyaml
+influxdb
+paho-mqtt
+python-dotenv
+async-timeout
