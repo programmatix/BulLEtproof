@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from viatom_device import ViatomDevice
@@ -65,7 +66,9 @@ async def startup_event():
     if not startup_complete:
         logger.info("Starting BLE manager")
         asyncio.create_task(ble_manager.run())
-        await ble_manager.connect_to_core()
+        viatom_device_address = os.getenv('VIATOM_DEVICE_ADDRESS')
+        core_device_address = os.getenv('CORE_DEVICE_ADDRESS')
+        await ble_manager.queue_connect_to_specific_device(viatom_device_address)
         startup_complete = True
 
 @app.on_event("shutdown")
@@ -97,7 +100,7 @@ async def connect_device(address: str):
 
 @app.post("/disconnect/{address}")
 async def disconnect_device(address: str):
-    ble_manager.add_task(ble_manager.disconnect_device(address))
+    ble_manager.add_task(ble_manager.queue_disconnect_device(address))
     return {"success": True}
 
 @app.websocket("/ws/{address}")

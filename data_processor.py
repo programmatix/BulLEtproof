@@ -4,6 +4,7 @@ from threading import Thread
 import json
 
 from core_device import CoreTempData
+from viatom_device import ViatomData
 
 class DataProcessor:
     def __init__(self, data_queue: Queue, influx_manager, mqtt_manager):
@@ -22,14 +23,18 @@ class DataProcessor:
     def process_data(self):
         while True:
             try:
-                core_temp_data = self.data_queue.get()
-                self.logger.info(f"Processing data: {core_temp_data}")
-                self.process_for_influx(core_temp_data)
-                self.process_for_mqtt(core_temp_data)
+                data = self.data_queue.get()
+                self.logger.info(f"Processing data: {data}")
+                if isinstance(data, CoreTempData):
+                    self.process_core_for_influx(data)
+                    self.process_core_for_mqtt(data)
+                elif isinstance(data, ViatomData):
+                    self.process_viatom_for_influx(data)
+                    self.process_viatom_for_mqtt(data)
             except Exception as e:
-                self.logger.error(f"Error processing data: {e}")
+                self.logger.error(f"Error processing data: {e}", exc_info=True)
 
-    def process_for_influx(self, core_temp_data: 'CoreTempData'):
+    def process_core_for_influx(self, core_temp_data: CoreTempData):
         influx_data = {
             "measurement": "android_temp",
             "tags": {
@@ -44,7 +49,7 @@ class DataProcessor:
         }
         self.influx_queue.put(influx_data)
 
-    def process_for_mqtt(self, core_temp_data: 'CoreTempData'):
+    def process_core_for_mqtt(self, core_temp_data: CoreTempData):
         mqtt_data = {
             "temp": core_temp_data.temp
         }
@@ -53,6 +58,39 @@ class DataProcessor:
         
         mqtt_message = {
             "topic": "xl/core/temp",
+            "payload": json.dumps(mqtt_data)
+        }
+        self.mqtt_queue.put(mqtt_message)
+
+    def process_viatom_for_influx(self, viatom_data: ViatomData):
+        influx_data = {
+            "measurement": "android_o2",
+            "tags": {
+                "model": "Minix",
+                "source": "Viatom"
+            },
+            "fields": {
+                "hr": viatom_data.hr,
+                "spo2": viatom_data.spo2,
+                "pi": viatom_data.perfusion_index,
+                "battery": viatom_data.battery,
+                "movement": viatom_data.movement
+            },
+            "time": viatom_data.timestamp
+        }
+        self.influx_queue.put(influx_data)
+
+    def process_viatom_for_mqtt(self, viatom_data: ViatomData):
+        mqtt_data = {
+            "o2": viatom_data.spo2,
+            "hr": viatom_data.hr,
+            "perfusionIndex": viatom_data.perfusion_index,
+            "battery": viatom_data.battery,
+            "movement": viatom_data.movement
+        }
+        
+        mqtt_message = {
+            "topic": "xl/viatom/data",
             "payload": json.dumps(mqtt_data)
         }
         self.mqtt_queue.put(mqtt_message)

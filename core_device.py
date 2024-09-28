@@ -61,6 +61,8 @@ class CoreDevice:
 
     def core_temperature_measurement_handler(self, sender, data):
         try:
+            timestamp = int(time.time() * 1e9)  # nanosecond precision
+                
             flags = data[0]
             skin_temp_present = flags & 0x1 != 0
             core_reserved_present = flags & 0x2 != 0
@@ -95,8 +97,6 @@ class CoreDevice:
             self.logger.info(f"Temperature: core={core_temp} skin={skin_temp} {unit} {quality_str} invalid={invalid_data}")
 
             if not invalid_data:
-                timestamp = int(time.time() * 1e9)  # nanosecond precision
-                
                 core_temp_data = CoreTempData(
                     temp=core_temp,
                     unit=unit,

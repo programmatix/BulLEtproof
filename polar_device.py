@@ -18,10 +18,10 @@ class PolarAccData:
     z: float
 
 class PolarDevice:
-    def __init__(self, client):
+    def __init__(self, client, data_queue):
         self.client = client
         self.logger = logging.getLogger(__name__)
-
+        self.data_queue = data_queue
     async def subscribe(self):
         self.logger.info(f"Subscribing to Polar device {self.client.address}")
         await self.client.start_notify(UUIDs.POLAR_HR, self.hr_handler)
