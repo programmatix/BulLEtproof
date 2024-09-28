@@ -49,7 +49,8 @@ class ConnectCommand(BLECommand):
         except asyncio.TimeoutError:
             manager.logger.warning(f"Connection attempt {self.attempt + 1} to {device_name} timed out after {manager.connection_timeout} seconds")
         except BleakError as e:
-            manager.logger.error(f"BleakError on attempt {self.attempt + 1} connecting to device {device_name}: {e}", exc_info=True)
+            # Probably just cannot connect
+            manager.logger.info(f"BleakError on attempt {self.attempt + 1} connecting to device {device_name}: {e}")
         except Exception as e:
             manager.logger.error(f"Unexpected error on attempt {self.attempt + 1} connecting to device {device_name}: {e}", exc_info=True)
 
@@ -67,14 +68,25 @@ class DisconnectCommand(BLECommand):
 
     async def execute(self, manager):
         manager.logger.info(f"Disconnecting from device {self.address}")
+        await manager.cleanup_device(self.address)
+
         if self.address in manager.clients:
-            await manager.clients[self.address].disconnect()
-            del manager.clients[self.address]
-            manager.logger.info(f"Disconnected from device {self.address}")
+            try:
+                await manager.clients[self.address].disconnect()
+            except EOFError:
+                manager.logger.warning(f"EOFError while disconnecting from {self.address}. The device might have already disconnected.")
+            except Exception as e:
+                manager.logger.error(f"Unexpected error while disconnecting from {self.address}: {e}", exc_info=True)
+            finally:
+                # Regardless of whether the disconnect succeeded or failed, remove the client from our list
+                del manager.clients[self.address]
+                manager.logger.info(f"Removed device {self.address} from active clients")
+        else:
+            manager.logger.warning(f"Attempted to disconnect non-existent client {self.address}")
 
 class BLEManager:
     def __init__(self, data_queue):
-        self.devices = {}
+        self.devices = {}  # Store device instances
         self.clients = {}
         self.logger = logging.getLogger(__name__)
         self.auto_connect_devices = set()
@@ -90,7 +102,6 @@ class BLEManager:
         # self.data_received_queue = asyncio.Queue()
         # self.data_processing_thread = threading.Thread(target=self.process_device_data_thread, daemon=True)
         # self.data_processing_thread.start()
-        self.client_ids = {}
 
     def generate_client_id(self, address):
         return str(uuid.uuid4())[:8]  # Use the first 8 characters of a UUID
@@ -142,15 +153,14 @@ class BLEManager:
                 self.logger.warning(f"No data received from {self.get_device_name(address)} for {self.data_inactivity_timeout} seconds")
                 await self.queue_disconnect_and_reconnect(address)
 
+        for address, device in list(self.devices.items()):
+            self.logger.info(f"Device {device} exists for {address}")
+
     async def queue_disconnect_and_reconnect(self, address):
         await self.queue_disconnect_device(address)
         await self.command_queue.put(ConnectCommand(address))
 
     def get_device_name(self, address):
-        device_info = self.devices.get(address, {})
-        name = device_info.get('name')
-        if name:
-            return f"{name} ({address})"
         return address
 
     async def handle_post_connection(self, client: BleakClient, address: str):
@@ -159,7 +169,6 @@ class BLEManager:
         device_name = self.get_device_name(address)
         
         client_id = self.generate_client_id(address)
-        self.client_ids[address] = client_id
         
         self.logger.info(f"[{client_id}] Connected to device {device_name}")
         
@@ -178,7 +187,6 @@ class BLEManager:
                         if "2a00" in char.uuid.lower():  # Device Name characteristic
                             name = await client.read_gatt_char(char.uuid)
                             name = name.decode('utf-8')
-                            self.devices[address]['name'] = name
                             device_name = self.get_device_name(address)
                             self.logger.info(f"Updated device name: {device_name}")
                             break
@@ -210,17 +218,32 @@ class BLEManager:
         try:
             await device.subscribe()
             self.logger.info(f"[{client_id}] Successfully subscribed to device {device_name}")
+            self.devices[address] = device  # Store the device instance
         except Exception as e:
             self.logger.error(f"[{client_id}] Failed to subscribe to device {device_name}: {e}", exc_info=True)
             await self.queue_disconnect_device(address)
-
+    
     def update_last_data_received(self, address):
         self.logger.info(f"Updating last data received for {address}")
         self.last_data_received[address] = time.time()
 
+
     async def queue_connect_to_specific_device(self, address):
         self.logger.info(f"Attempting to connect to device at {address}")
         await self.command_queue.put(ConnectCommand(address))
+
+    async def cleanup_device(self, address):
+        self.logger.info(f"Cleaning up device {address}")
+        if address in self.devices:
+            device = self.devices[address]
+            self.logger.info(f"Existing device: {address} {device}")
+            try:
+                # Assuming each device class has a cleanup method
+                await device.cleanup()
+            except Exception as e:
+                self.logger.error(f"Error cleaning up device {address}: {e}", exc_info=True)
+            finally:
+                del self.devices[address]
 
     async def queue_disconnect_device(self, address):
         await self.command_queue.put(DisconnectCommand(address))

@@ -36,13 +36,24 @@ class ViatomDevice:
         self.logger.info(f"ViatomDevice initialized with client_id: {client_id}")
         self.dead = False
 
-    def __del__(self):
-        self.logger.info(f"ViatomDevice {self.client_id} being deleted")
+    def __str__(self):
+        return f"ViatomDevice(client_id={self.client_id})"
+
+    async def cleanup(self):
+        self.logger.info(f"ViatomDevice {self.client_id} being cleaned up")
         self.dead = True
         if self.future_request_more_data:
             self.future_request_more_data.cancel()
 
+    def __del__(self):
+        self.logger.info(f"ViatomDevice {self.client_id} being deleted")
+        self.cleanup()
+
     async def data_handler(self, sender, data):
+        if self.dead:
+            self.logger.info(f"Is dead, ignoring data")
+            return
+
         if not self.client.is_connected:
             self.logger.warn(f"Device {self.client.address} is not connected")
             return

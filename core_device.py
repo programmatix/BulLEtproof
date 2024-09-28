@@ -27,8 +27,24 @@ class CoreDevice:
         self.data_queue = data_queue
         self.client_id = client_id
         self.logger.info(f"CoreDevice initialized with client_id: {client_id}")
+        self.dead = False
+
+    def __str__(self):
+        return f"CoreDevice(client_id={self.client_id})"
+
+    def __del__(self):
+        self.logger.info(f"CoreDevice {self.client_id} being deleted")
+        self.cleanup()
+
+    async def cleanup(self):
+        self.logger.info(f"CoreDevice {self.client_id} being cleaned up")
+        pass
 
     async def core_temperature_measurement_handler(self, sender, data):
+        if self.dead:
+            self.logger.info(f"Is dead, ignoring data")
+            return
+
         if not self.client.is_connected:
             self.logger.warn(f"Device {self.client.address} is not connected")
             return
