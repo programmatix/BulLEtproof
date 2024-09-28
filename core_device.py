@@ -1,16 +1,16 @@
+import asyncio
 import logging
 from dataclasses import dataclass
 import time
 from queue import Queue
+from ble_command import SharedData
 
 from constants import UUIDs
 
 @dataclass
-class CoreTempData:
+class CoreTempData(SharedData):
     temp: float
     unit: str
-    device_address: str
-    timestamp: int
     quality: str = ""
     skin_temp: float = None
 
@@ -21,45 +21,18 @@ class CoreConstants:
     TEMPERATURE_MEASUREMENT_CHARACTERISTIC_UUID = "00002102-5b1e-4347-b07c-97b514dae121"
 
 class CoreDevice:
-    def __init__(self, client, data_queue: Queue):
+    def __init__(self, client, data_queue: asyncio.Queue, client_id: str):
         self.client = client
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(f"{__name__}.{client_id}")
         self.data_queue = data_queue
+        self.client_id = client_id
+        self.logger.info(f"CoreDevice initialized with client_id: {client_id}")
 
-    def temperature_measurement_handler(self, sender, data):
-        try:
-            flags = data[0]
-            unit = "Fahrenheit" if flags & 0x01 else "Celsius"
-            temp_data = int.from_bytes(data[1:5], byteorder='little')
-            
-            if temp_data == 0x007FFFFF:
-                self.logger.debug("Received cbt value IEEE11073 NaN (not a number).")
-            elif temp_data == 0x007FFFFE:
-                self.logger.debug("Received cbt value IEEE11073 + Infinity")
-            elif temp_data == 0x00800002:
-                self.logger.debug("Received cbt value IEEE11073 - Infinity")
-            elif temp_data == 0x00800000:
-                self.logger.debug("Received cbt value IEEE11073 NRes (Not at this resolution).")
-            else:
-                exponent = temp_data >> 24
-                mantissa = temp_data & 0x00FFFFFF
-                actual_temp = mantissa * (10 ** exponent)
-                self.logger.info(f"Temperature: {actual_temp} {unit}")
-                
-                timestamp = int(time.time() * 1e9)  # nanosecond precision
-                
-                core_temp_data = CoreTempData(
-                    temp=actual_temp,
-                    unit=unit,
-                    device_address=self.client.address,
-                    timestamp=timestamp
-                )
-                
-                self.data_queue.put(core_temp_data)
-        except Exception as e:
-            self.logger.error(f"Error handling temperature measurement: {e}")
+    async def core_temperature_measurement_handler(self, sender, data):
+        if not self.client.is_connected:
+            self.logger.warn(f"Device {self.client.address} is not connected")
+            return
 
-    def core_temperature_measurement_handler(self, sender, data):
         try:
             timestamp = int(time.time() * 1e9)  # nanosecond precision
                 
@@ -108,7 +81,7 @@ class CoreDevice:
                 
                 self.data_queue.put(core_temp_data)
         except Exception as e:
-            self.logger.error(f"Error handling temperature measurement: {e}")
+            self.logger.error(f"Error handling temperature measurement: {e}", exc_info=True)
 
     async def subscribe(self):
         service = self.client.services.get_service(CoreConstants.CORE_TEMP_SERVICE_UUID)

@@ -3,16 +3,18 @@ from queue import Queue
 from threading import Thread
 import json
 
+from ble_command import SharedData
 from core_device import CoreTempData
 from viatom_device import ViatomData
 
 class DataProcessor:
-    def __init__(self, data_queue: Queue, influx_manager, mqtt_manager):
+    def __init__(self, data_queue: Queue[SharedData], influx_manager, mqtt_manager, ble_manager):
         self.data_queue = data_queue
         self.influx_queue = Queue()
         self.mqtt_queue = Queue()
         self.influx_manager = influx_manager
         self.mqtt_manager = mqtt_manager
+        self.ble_manager = ble_manager
         self.logger = logging.getLogger(__name__)
 
     def start(self):
@@ -21,10 +23,14 @@ class DataProcessor:
         Thread(target=self.handle_mqtt_queue, daemon=True).start()
 
     def process_data(self):
+        self.logger.info("Starting data processing")
         while True:
             try:
-                data = self.data_queue.get()
+                data: SharedData = self.data_queue.get()
                 self.logger.info(f"Processing data: {data}")
+
+                self.ble_manager.update_last_data_received(data.device_address)
+
                 if isinstance(data, CoreTempData):
                     self.process_core_for_influx(data)
                     self.process_core_for_mqtt(data)

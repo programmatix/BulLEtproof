@@ -2,6 +2,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 import time
+from ble_command import SharedData
 
 from bleak import BleakClient
 
@@ -9,13 +10,12 @@ from ble_command import BLECommand
 from constants import UUIDs
 
 @dataclass
-class ViatomData:
+class ViatomData(SharedData):
     hr: float
     spo2: float
     perfusion_index: float
     battery: float
     movement: float
-    timestamp: int
 
 class ViatomConstants:
     SERVICE_UUID = "14839ac4-7d7e-415c-9a42-167340cf2339"
@@ -25,14 +25,28 @@ class ViatomConstants:
     WRITE_BYTES = bytearray([0xaa, 0x17, 0xe8, 0x00, 0x00, 0x00, 0x00, 0x1b])    
 
 class ViatomDevice:
-    def __init__(self, client: BleakClient, data_queue, ble_manager):
+    def __init__(self, client, data_queue, ble_manager, client_id: str):
         self.client = client
-        self.logger = logging.getLogger(__name__)
         self.data_queue = data_queue
         self.ble_manager = ble_manager
+        self.logger = logging.getLogger(f"{__name__}.{client_id}")
+        self.write_char = None
+        self.client_id = client_id
         self.future_request_more_data = None
+        self.logger.info(f"ViatomDevice initialized with client_id: {client_id}")
+        self.dead = False
+
+    def __del__(self):
+        self.logger.info(f"ViatomDevice {self.client_id} being deleted")
+        self.dead = True
+        if self.future_request_more_data:
+            self.future_request_more_data.cancel()
 
     async def data_handler(self, sender, data):
+        if not self.client.is_connected:
+            self.logger.warn(f"Device {self.client.address} is not connected")
+            return
+
         timestamp = int(time.time() * 1e9)  # nanosecond precision
         self.logger.info(f"Received data from Viatom device: {data.hex()}")
         
@@ -66,7 +80,8 @@ class ViatomDevice:
                     perfusion_index=self.perfusion_index,
                     battery=self.battery,
                     movement=self.movement,
-                    timestamp=timestamp
+                    timestamp=timestamp,
+                    device_address=self.client.address
                 ))
 
             if self.future_request_more_data:
@@ -79,6 +94,14 @@ class ViatomDevice:
             self.viatom_device = viatom_device
 
         async def execute(self, manager):
+            if self.viatom_device.dead:
+                self.viatom_device.logger.info(f"Ignoring RequestMoreDataCommand (viatom_device.dead)")
+                return
+            
+            if not self.viatom_device.client.is_connected:
+                self.viatom_device.logger.warn(f"Device {self.viatom_device.client.address} is not connected (RequestMoreDataCommand)")
+                return
+            
             await self.viatom_device.client.write_gatt_char(self.viatom_device.write_char, ViatomConstants.WRITE_BYTES)
 
     async def subscribe(self):

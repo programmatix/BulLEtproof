@@ -1,6 +1,7 @@
 import os
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from ble_command import SharedData
 from viatom_device import ViatomDevice
 from polar_device import PolarDevice
 from core_device import CoreDevice
@@ -15,8 +16,12 @@ import sys
 from ble_manager import BLEManager
 from queue import Queue
 from data_processor import DataProcessor
+import urllib3
+import warnings
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 load_dotenv()
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', force=True)
@@ -45,13 +50,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-data_queue = Queue()
+data_queue = Queue[SharedData]()
 ble_manager = BLEManager(data_queue)
 influx_manager = InfluxManager()
 mqtt_manager = MQTTManager()
 
 # Initialize DataProcessor
-data_processor = DataProcessor(data_queue, influx_manager, mqtt_manager)
+data_processor = DataProcessor(data_queue, influx_manager, mqtt_manager, ble_manager)
 
 # Start data processing
 data_processor.start()
@@ -69,6 +74,7 @@ async def startup_event():
         viatom_device_address = os.getenv('VIATOM_DEVICE_ADDRESS')
         core_device_address = os.getenv('CORE_DEVICE_ADDRESS')
         await ble_manager.queue_connect_to_specific_device(viatom_device_address)
+        # await ble_manager.queue_connect_to_specific_device(core_device_address)
         startup_complete = True
 
 @app.on_event("shutdown")
