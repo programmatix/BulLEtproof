@@ -2,9 +2,9 @@ import os
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from ble_command import SharedData
-from viatom_device import ViatomDevice
-from polar_device import PolarDevice
-from core_device import CoreDevice
+from viatom_device import ViatomClientManager
+from polar_device import PolarClientManager
+from core_device import CoreClientManager
 from influx_manager import InfluxManager
 from mqtt_manager import MQTTManager
 import asyncio
@@ -74,9 +74,9 @@ async def startup_event():
         viatom_device_address = os.getenv('VIATOM_DEVICE_ADDRESS')
         core_device_address = os.getenv('CORE_DEVICE_ADDRESS')
         polar_device_address = os.getenv('POLAR_DEVICE_ADDRESS')
-        # await ble_manager.queue_connect_to_specific_device(viatom_device_address)
-        # await ble_manager.queue_connect_to_specific_device(core_device_address)
-        await ble_manager.queue_connect_to_specific_device(polar_device_address)
+        #await ble_manager.queue_connect_to_specific_device(viatom_device_address, event_id="startup", reason="Startup")
+        #await ble_manager.queue_connect_to_specific_device(core_device_address, event_id="startup", reason="Startup")
+        await ble_manager.queue_connect_to_specific_device(polar_device_address, event_id="startup", reason="Startup")
         startup_complete = True
 
 @app.on_event("shutdown")

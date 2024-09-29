@@ -20,24 +20,24 @@ class CoreConstants:
     CORE_TEMP_SERVICE_CHARACTERISTIC1_UUID = "00002101-5b1e-4347-b07c-97b514dae121"
     TEMPERATURE_MEASUREMENT_CHARACTERISTIC_UUID = "00002102-5b1e-4347-b07c-97b514dae121"
 
-class CoreDevice:
+class CoreClientManager:
     def __init__(self, client, data_queue: asyncio.Queue, client_id: str):
         self.client = client
         self.logger = logging.getLogger(f"{__name__}.{client_id}")
         self.data_queue = data_queue
         self.client_id = client_id
-        self.logger.info(f"CoreDevice initialized with client_id: {client_id}")
+        self.logger.info(f"CoreClientManager initialized with client_id: {client_id}")
         self.dead = False
 
     def __str__(self):
-        return f"CoreDevice(client_id={self.client_id})"
+        return f"CoreClientManager(client_id={self.client_id})"
 
     def __del__(self):
-        self.logger.info(f"CoreDevice {self.client_id} being deleted")
+        self.logger.info(f"CoreClientManager {self.client_id} being deleted")
         self.cleanup()
 
     async def cleanup(self):
-        self.logger.info(f"CoreDevice {self.client_id} being cleaned up")
+        self.logger.info(f"CoreClientManager {self.client_id} being cleaned up")
         pass
 
     async def core_temperature_measurement_handler(self, sender, data):

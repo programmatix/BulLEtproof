@@ -81,7 +81,7 @@ class HRVResult:
     hr: int
     rr_intervals: List[int] = field(default_factory=list)
 
-class PolarDevice:
+class PolarClientManager:
     def __init__(self, client: BleakClient, data_queue: asyncio.Queue, client_id: str):
         self.client = client
         self.data_queue = data_queue
@@ -92,17 +92,17 @@ class PolarDevice:
         self.dead = False
         self.hr_entries = []
         self.hrv_entries = []
-        self.logger.info(f"PolarDevice initialized with client_id: {client_id}")
+        self.logger.info(f"PolarClientManager initialized with client_id: {client_id}")
 
     def __str__(self):
-        return f"PolarDevice(client_id={self.client_id})"
+        return f"PolarClientManager(client_id={self.client_id})"
 
     async def cleanup(self):
-        self.logger.info(f"PolarDevice {self.client_id} being cleaned up")
+        self.logger.info(f"PolarClientManager {self.client_id} being cleaned up")
         self.dead = True
 
     def __del__(self):
-        self.logger.info(f"PolarDevice {self.client_id} being deleted")
+        self.logger.info(f"PolarClientManager {self.client_id} being deleted")
         self.cleanup()
 
     async def hr_handler(self, sender, data):

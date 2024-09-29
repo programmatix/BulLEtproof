@@ -24,7 +24,7 @@ class ViatomConstants:
     CLIENT_CHARACTERISTIC_DESCRIPTOR_UUID = "00002902-0000-1000-8000-00805f9b34fb"
     WRITE_BYTES = bytearray([0xaa, 0x17, 0xe8, 0x00, 0x00, 0x00, 0x00, 0x1b])    
 
-class ViatomDevice:
+class ViatomClientManager:
     def __init__(self, client, data_queue, ble_manager, client_id: str):
         self.client = client
         self.data_queue = data_queue
@@ -33,20 +33,20 @@ class ViatomDevice:
         self.write_char = None
         self.client_id = client_id
         self.future_request_more_data = None
-        self.logger.info(f"ViatomDevice initialized with client_id: {client_id}")
+        self.logger.info(f"ViatomClientManager initialized with client_id: {client_id}")
         self.dead = False
 
     def __str__(self):
-        return f"ViatomDevice(client_id={self.client_id})"
+        return f"ViatomClientManager(client_id={self.client_id})"
 
     async def cleanup(self):
-        self.logger.info(f"ViatomDevice {self.client_id} being cleaned up")
+        self.logger.info(f"ViatomClientManager {self.client_id} being cleaned up")
         self.dead = True
         if self.future_request_more_data:
             self.future_request_more_data.cancel()
 
     def __del__(self):
-        self.logger.info(f"ViatomDevice {self.client_id} being deleted")
+        self.logger.info(f"ViatomClientManager {self.client_id} being deleted")
         self.cleanup()
 
     async def data_handler(self, sender, data):
