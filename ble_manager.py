@@ -93,14 +93,10 @@ class BLEManager:
         self.data_queue = data_queue
         self.logger.info(f"Data queue initialized with size: {data_queue}")
         self.command_queue = asyncio.Queue()
-        # self.device_data_queue = asyncio.Queue()
         self.max_retries = 3
         self.connection_timeout = 30
         self.scheduled_tasks = []
         self.data_inactivity_timeout = 60
-        # self.data_received_queue = asyncio.Queue()
-        # self.data_processing_thread = threading.Thread(target=self.process_device_data_thread, daemon=True)
-        # self.data_processing_thread.start()
 
     def generate_client_id(self, address):
         return str(uuid.uuid4())[:8]  # Use the first 8 characters of a UUID
@@ -141,20 +137,29 @@ class BLEManager:
     async def check_client_manager_status(self):
         current_time = time.time()
         self.logger.info(f"Checking client manager status at {current_time}")
+        device_statuses = []
 
         for address, client_manager in list(self.client_managers.items()):
             self.logger.info(f"Client manager {client_manager} exists for {address}")
             client = client_manager.client
-            self.logger.info(f"Checking device status for {self.get_device_name(address)} client_manager_id={client_manager.client_id}: connected={client.is_connected} last_data_received={self.last_data_received.get(address, 0)} current_time={current_time} time_since_last_data={current_time - self.last_data_received.get(address, 0)}")
+            time_since_last_data = current_time - self.last_data_received.get(address, 0)
+            self.logger.info(f"Checking device status for {self.get_device_name(address)} client_manager_id={client_manager.client_id}: connected={client.is_connected} last_data_received={self.last_data_received.get(address, 0)} current_time={current_time} time_since_last_data={time_since_last_data}")
             if not client.is_connected:
+                status = f"{self.get_device_name(address)}: Disconnected"
                 event_id = self.generate_event_id(address)
                 self.logger.warning(f"[{event_id}] Detected disconnection for device {self.get_device_name(address)}")
                 await self.queue_disconnect_and_reconnect(address, event_id, "Device disconnected on us")
-            elif current_time - self.last_data_received.get(address, 0) > self.data_inactivity_timeout:
+            elif time_since_last_data > self.data_inactivity_timeout:
+                status = f"{self.get_device_name(address)}: Connected, last data {time_since_last_data:.1f}s ago"
                 event_id = self.generate_event_id(address)
                 self.logger.warning(f"[{event_id}] No data received from {self.get_device_name(address)} for {self.data_inactivity_timeout} seconds")
                 await self.queue_disconnect_and_reconnect(address, event_id, "No data received for too long")
+            else:
+                status = f"{self.get_device_name(address)}: Connected, last data {time_since_last_data:.1f}s ago"
+            device_statuses.append(status)
 
+        summary = " | ".join(device_statuses)
+        self.logger.info(f"Device status summary: {summary}")
 
     async def queue_disconnect_and_reconnect(self, address, event_id, reason: str = None):
         await self.queue_disconnect_device(address, event_id, reason)

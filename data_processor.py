@@ -1,5 +1,5 @@
 import logging
-from queue import Queue
+from queue import Full, Queue
 from threading import Thread
 import json
 
@@ -11,12 +11,14 @@ from viatom_device import ViatomData
 class DataProcessor:
     def __init__(self, data_queue: Queue[SharedData], influx_manager, mqtt_manager, ble_manager):
         self.data_queue = data_queue
-        self.influx_queue = Queue()
-        self.mqtt_queue = Queue()
+        self.influx_queue = Queue(maxsize=100_000)
+        self.mqtt_queue = Queue(maxsize=100)
         self.influx_manager = influx_manager
         self.mqtt_manager = mqtt_manager
         self.ble_manager = ble_manager
         self.logger = logging.getLogger(__name__)
+        self.dropped_influx = 0
+        self.dropped_mqtt = 0
 
     def start(self):
         Thread(target=self.process_data, daemon=True).start()
@@ -28,7 +30,7 @@ class DataProcessor:
         while True:
             try:
                 data: SharedData = self.data_queue.get()
-                self.logger.info(f"Processing data: {data}")
+                self.logger.info(f"Processing data: {data} num_dropped_influx: {self.dropped_influx} num_dropped_mqtt: {self.dropped_mqtt} influx_queue_size: {self.influx_queue.qsize()} mqtt_queue_size: {self.mqtt_queue.qsize()}")
 
                 self.ble_manager.update_last_data_received(data.device_address)
 
@@ -49,6 +51,18 @@ class DataProcessor:
             except Exception as e:
                 self.logger.error(f"Error processing data: {e}", exc_info=True)
 
+    def add_to_influx_queue(self, influx_data: dict):
+        try:
+            self.influx_queue.put(influx_data, block=False)
+        except Full as e:
+            self.dropped_influx += 1
+
+    def add_to_mqtt_queue(self, mqtt_data: dict):
+        try:
+            self.mqtt_queue.put(mqtt_data, block=False)
+        except Full as e:
+            self.dropped_mqtt += 1
+
     def process_core_for_influx(self, core_temp_data: CoreTempData):
         influx_data = {
             "measurement": "android_temp",
@@ -62,7 +76,7 @@ class DataProcessor:
             },
             "time": core_temp_data.timestamp
         }
-        self.influx_queue.put(influx_data)
+        self.add_to_influx_queue(influx_data)
 
     def process_core_for_mqtt(self, core_temp_data: CoreTempData):
         mqtt_data = {
@@ -73,9 +87,9 @@ class DataProcessor:
         
         mqtt_message = {
             "topic": "xl/core/temp",
-            "payload": json.dumps(mqtt_data)
+            "payload": mqtt_data
         }
-        self.mqtt_queue.put(mqtt_message)
+        self.add_to_mqtt_queue(mqtt_message)
 
     def process_viatom_for_influx(self, viatom_data: ViatomData):
         influx_data = {
@@ -93,7 +107,7 @@ class DataProcessor:
             },
             "time": viatom_data.timestamp
         }
-        self.influx_queue.put(influx_data)
+        self.add_to_influx_queue(influx_data)
 
     def process_viatom_for_mqtt(self, viatom_data: ViatomData):
         mqtt_data = {
@@ -106,9 +120,9 @@ class DataProcessor:
         
         mqtt_message = {
             "topic": "xl/viatom/data",
-            "payload": json.dumps(mqtt_data)
+            "payload": mqtt_data
         }
-        self.mqtt_queue.put(mqtt_message)
+        self.add_to_mqtt_queue(mqtt_message)
 
 
     def process_polar_hr_for_influx(self, polar_data: PolarHRData):
@@ -131,7 +145,7 @@ class DataProcessor:
             },
             "time": polar_data.timestamp
         }
-        self.influx_queue.put(influx_data)
+        self.add_to_influx_queue(influx_data)
 
     def process_polar_hr_for_mqtt(self, polar_data: PolarHRData):
         mqtt_data = {
@@ -147,9 +161,9 @@ class DataProcessor:
         
         mqtt_message = {
             "topic": "xl/polar/hr",
-            "payload": json.dumps(mqtt_data)
+            "payload": mqtt_data
         }
-        self.mqtt_queue.put(mqtt_message)
+        self.add_to_mqtt_queue(mqtt_message)
 
     def process_polar_acc_for_influx(self, polar_data: PolarAccData):
         influx_data = {
@@ -166,7 +180,7 @@ class DataProcessor:
             },
             "time": polar_data.timestamp
         }
-        self.influx_queue.put(influx_data)
+        self.add_to_influx_queue(influx_data)
 
     def process_polar_acc_for_mqtt(self, polar_data: PolarAccData):
         mqtt_data = {
@@ -178,9 +192,9 @@ class DataProcessor:
         
         mqtt_message = {
             "topic": "xl/polar/accelerometer",
-            "payload": json.dumps(mqtt_data)
+            "payload": mqtt_data
         }
-        self.mqtt_queue.put(mqtt_message)
+        self.add_to_mqtt_queue(mqtt_message)
 
     def handle_influx_queue(self):
         while True:
