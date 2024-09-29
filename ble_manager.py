@@ -210,7 +210,7 @@ class BLEManager:
         except Exception as e:
             event_id = self.generate_event_id(address)
             self.logger.error(f"[{event_id}] Failed to subscribe to device {device_name}: {e}", exc_info=True)
-            await self.queue_disconnect_device(address, event_id, "Failed to subscribe")
+            await self.queue_disconnect_and_reconnect(address, event_id, "Failed to subscribe")
     
     def update_last_data_received(self, address):
         self.logger.info(f"Updating last data received for {self.get_device_name(address)}")

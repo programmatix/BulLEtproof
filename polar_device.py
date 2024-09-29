@@ -110,7 +110,7 @@ class PolarClientManager:
             return
 
         timestamp = int(time.time() * 1e9)
-        self.logger.debug(f"Received HR data from Polar device: {data.hex()}")
+        self.logger.info(f"Received HR data from Polar device: {data.hex()}")
 
         result = self.handle_heart_rate_measurement(data, timestamp)
         hr_data = PolarHRData(
@@ -184,23 +184,11 @@ class PolarClientManager:
         return math.sqrt(sum_squared_diff / (len(rr_intervals) - 1))
 
     @staticmethod
-    def calculate_graham_hrv(rr_intervals: List[int]) -> float:
+    def calculate_sd_hrv(rr_intervals: List[int]) -> float:
         if len(rr_intervals) < 2:
             return 0.0
         sum_abs_diff = sum(abs(rr_intervals[i+1] - rr_intervals[i]) for i in range(len(rr_intervals) - 1))
         return sum_abs_diff / (len(rr_intervals) - 1)
-
-    @staticmethod
-    def calculate_hrv(rr_intervals: List[int]) -> float:
-        if len(rr_intervals) < 2:
-            return 0.0
-        rmssd = PolarDevice.calculate_rmssd(rr_intervals)
-        return math.log(rmssd)
-
-    def handle_ecg_quality_measurement(self, value: bytearray) -> int:
-        out = value[0] & 0xff
-        self.logger.info(f"ECG Quality: {out}")
-        return out
 
     def handle_heart_rate_measurement(self, value: bytearray, time: int) -> HRVResult:
         flags = value[0]
@@ -217,6 +205,8 @@ class PolarClientManager:
                 rr_interval = int.from_bytes(value[i:i+2], byteorder='little')
                 rr_intervals.append(int((rr_interval / 1024.0) * 1000.0))
 
+        self.logger.info(f"Raw HR data: flags={flags}, heart_rate={heart_rate}, rr_intervals={rr_intervals}")
+
         hr_entry = (time, float(heart_rate))
         self.hr_entries.append(hr_entry)
 
@@ -224,34 +214,49 @@ class PolarClientManager:
             hrv = sum(rr_intervals) / len(rr_intervals)
             hrv_entry = (time, float(hrv))
             self.hrv_entries.append(hrv_entry)
+        else:
+            self.logger.warning("No RR intervals received")
 
-        self.hr_entries = [entry for entry in self.hr_entries if entry[0] >= time - 5]
-        self.hrv_entries = [entry for entry in self.hrv_entries if entry[0] >= time - 60 * 3]
+        current_time_seconds = time / 1e9
+        self.hr_entries = [entry for entry in self.hr_entries if entry[0] >= current_time_seconds - 5]
+        self.hrv_entries = [entry for entry in self.hrv_entries if entry[0] >= current_time_seconds - 60 * 3]
+
+        # self.logger.info(f"HR entries after filtering: {self.hr_entries}")
+        # self.logger.info(f"HRV entries after filtering: {self.hrv_entries}")
 
         average_hrv = sum(entry[1] for entry in self.hrv_entries) / len(self.hrv_entries) if self.hrv_entries else 0
+        # self.logger.info(f"Average HRV: {average_hrv}")
+
         self.hrv_entries = [entry for entry in self.hrv_entries if average_hrv / 2 <= entry[1] <= average_hrv * 2]
 
-        very_recent_hrv_entries = [entry for entry in self.hrv_entries if entry[0] > time - 10]
-        somewhat_recent_hrv_entries = [entry for entry in self.hrv_entries if entry[0] > time - 60]
+        very_recent_hrv_entries = [entry for entry in self.hrv_entries if entry[0] > current_time_seconds - 10]
+        somewhat_recent_hrv_entries = [entry for entry in self.hrv_entries if entry[0] > current_time_seconds - 60]
         less_recent_hrv_entries = self.hrv_entries
+
+        # self.logger.info(f"Very recent HRV entries: {very_recent_hrv_entries}")
+        # self.logger.info(f"Somewhat recent HRV entries: {somewhat_recent_hrv_entries}")
+        # self.logger.info(f"Less recent HRV entries: {less_recent_hrv_entries}")
 
         hrv_rmssd_very_recent = float(self.calculate_rmssd([entry[1] for entry in very_recent_hrv_entries]))
         hrv_rmssd_somewhat_recent = float(self.calculate_rmssd([entry[1] for entry in somewhat_recent_hrv_entries]))
         hrv_rmssd_less_recent = float(self.calculate_rmssd([entry[1] for entry in less_recent_hrv_entries]))
-        hrv_graham_very_recent = float(self.calculate_graham_hrv([entry[1] for entry in very_recent_hrv_entries]))
-        hrv_graham_somewhat_recent = float(self.calculate_graham_hrv([entry[1] for entry in somewhat_recent_hrv_entries]))
-        hrv_graham_less_recent = float(self.calculate_graham_hrv([entry[1] for entry in less_recent_hrv_entries]))
-        hr = float(sum(entry[1] for entry in self.hr_entries if entry[1] > 0) / len(self.hr_entries)) if self.hr_entries else 0
+        hrv_sd_very_recent = float(self.calculate_sd_hrv([entry[1] for entry in very_recent_hrv_entries]))
+        hrv_sd_somewhat_recent = float(self.calculate_sd_hrv([entry[1] for entry in somewhat_recent_hrv_entries]))
+        hrv_sd_less_recent = float(self.calculate_sd_hrv([entry[1] for entry in less_recent_hrv_entries]))
+        hr = float(heart_rate)
 
-        self.logger.info(f"HR: {heart_rate} rrIntervals: {rr_intervals} rmssd={hrv_rmssd_very_recent} graham={hrv_graham_very_recent} recent={[entry[1] for entry in very_recent_hrv_entries]}")
+        # self.logger.info(f"HRV calculations: rmssd_very_recent={hrv_rmssd_very_recent}, rmssd_somewhat_recent={hrv_rmssd_somewhat_recent}, rmssd_less_recent={hrv_rmssd_less_recent}")
+        # self.logger.info(f"HRV calculations: sd_very_recent={hrv_sd_very_recent}, sd_somewhat_recent={hrv_sd_somewhat_recent}, sd_less_recent={hrv_sd_less_recent}")
+
+        self.logger.info(f"HR: {heart_rate} rrIntervals: {rr_intervals} rmssd={hrv_rmssd_very_recent} sdnn={hrv_sd_very_recent} recent={[entry[1] for entry in very_recent_hrv_entries]}")
 
         return HRVResult(
             hrv_rmssd_very_recent,
             hrv_rmssd_somewhat_recent,
             hrv_rmssd_less_recent,
-            hrv_graham_very_recent,
-            hrv_graham_somewhat_recent,
-            hrv_graham_less_recent,
+            hrv_sd_very_recent,
+            hrv_sd_somewhat_recent,
+            hrv_sd_less_recent,
             hr,
             rr_intervals
         )

@@ -80,10 +80,10 @@ class DataProcessor:
 
     def process_core_for_mqtt(self, core_temp_data: CoreTempData):
         mqtt_data = {
-            "temp": core_temp_data.temp
+            "temp": int(core_temp_data.temp)
         }
         if core_temp_data.skin_temp is not None:
-            mqtt_data["skinTemp"] = core_temp_data.skin_temp
+            mqtt_data["skinTemp"] = int(core_temp_data.skin_temp)
         
         mqtt_message = {
             "topic": "xl/core/temp",
@@ -111,11 +111,11 @@ class DataProcessor:
 
     def process_viatom_for_mqtt(self, viatom_data: ViatomData):
         mqtt_data = {
-            "o2": viatom_data.spo2,
-            "hr": viatom_data.hr,
-            "perfusionIndex": viatom_data.perfusion_index,
-            "battery": viatom_data.battery,
-            "movement": viatom_data.movement
+            "o2": int(viatom_data.spo2),
+            "hr": int(viatom_data.hr),
+            "perfusionIndex": int(viatom_data.perfusion_index),
+            "battery": int(viatom_data.battery),
+            "movement": int(viatom_data.movement)
         }
         
         mqtt_message = {
@@ -149,13 +149,13 @@ class DataProcessor:
 
     def process_polar_hr_for_mqtt(self, polar_data: PolarHRData):
         mqtt_data = {
-            "hr": polar_data.hr,
-            "hrvRMSSDVeryRecent": polar_data.hrv_rmssd_very_recent,
-            "hrvRMSSDSomewhatRecent": polar_data.hrv_rmssd_somewhat_recent,
-            "hrvRMSSDLessRecent": polar_data.hrv_rmssd_less_recent,
-            "hrvSDVeryRecent": polar_data.hrv_sd_very_recent,
-            "hrvSDSomewhatRecent": polar_data.hrv_sd_somewhat_recent,
-            "hrvSDLessRecent": polar_data.hrv_sd_less_recent,
+            "hr": int(polar_data.hr),
+            "hrvRMSSDVeryRecent": int(polar_data.hrv_rmssd_very_recent),
+            "hrvRMSSDSomewhatRecent": int(polar_data.hrv_rmssd_somewhat_recent),
+            "hrvRMSSDLessRecent": int(polar_data.hrv_rmssd_less_recent),
+            "hrvSDVeryRecent": int(polar_data.hrv_sd_very_recent),
+            "hrvSDSomewhatRecent": int(polar_data.hrv_sd_somewhat_recent),
+            "hrvSDLessRecent": int(polar_data.hrv_sd_less_recent),
             "rrIntervals": ','.join(map(str, polar_data.rr_intervals)),
         }
         
@@ -184,9 +184,9 @@ class DataProcessor:
 
     def process_polar_acc_for_mqtt(self, polar_data: PolarAccData):
         mqtt_data = {
-            "x": polar_data.x,
-            "y": polar_data.y,
-            "z": polar_data.z,
+            "x": int(polar_data.x),
+            "y": int(polar_data.y),
+            "z": int(polar_data.z),
             "position": polar_data.position.value
         }
         
