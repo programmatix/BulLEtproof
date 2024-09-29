@@ -22,17 +22,6 @@ class PolarHRData(SharedData):
     hrv_sd_somewhat_recent: float
     hrv_sd_less_recent: float
 
-@dataclass
-class PolarAccData(SharedData):
-    x: float
-    y: float
-    z: float
-    position: str
-
-@dataclass
-class AccelerometerMeasurement:
-    values: List[Tuple[int, int, int]]
-
 class PositionEnum(Enum):
     LyingBack = "LyingBack"
     Upright = "Upright"
@@ -41,11 +30,18 @@ class PositionEnum(Enum):
     Unknown = "Unknown"
 
 @dataclass
-class Position:
-    pos: PositionEnum
-    x: int
-    y: int
-    z: int
+class PolarAccData(SharedData):
+    x: float
+    y: float
+    z: float
+    position: PositionEnum
+    timestamp: int
+
+@dataclass
+class AccelerometerMeasurement:
+    values: List[Tuple[int, int, int]]
+
+
 
 class PolarConstants:
     HEART_RATE_SERVICE_UUID = "0000180d-0000-1000-8000-00805f9b34fb"
@@ -137,39 +133,31 @@ class PolarClientManager:
                 self.logger.info(f"PolarClientManager {self.client_id} is dead or not connected")
                 return
 
-            self.logger.info(f"Received ACC data from Polar device: {data.hex()}")
-            acc_data = self.handle_accelerometer_data(data)
+            timestamp = int(time.time() * 1e9)
+            acc_data: PolarAccData = self.handle_accelerometer_data(data, timestamp)
+            self.logger.info(f"Received ACC data from Polar device: {data.hex()} {acc_data}")
             if acc_data is not None:
-                pos = self.position(acc_data.x, acc_data.y, acc_data.z)
-            
                 now = datetime.now()
+                self.logger.info(f"now={now} last_accelerometer_data={self.last_accelerometer_data}")
                 if self.last_accelerometer_data is None or now > self.last_accelerometer_data + timedelta(seconds=5):
+                    self.logger.info(f"putting in queue")
                     self.last_accelerometer_data = now
-                    timestamp = int(time.time() * 1e9)
-                    acc_data = PolarAccData(
-                        x=acc_data.x,
-                        y=acc_data.y,
-                        z=acc_data.z,
-                        position=pos,
-                        timestamp=timestamp,
-                        device_address=self.client.address
-                    )
                     self.data_queue.put(acc_data)
 
         except Exception as e:
             self.logger.error(f"Error processing accelerometer data: {e}", exc_info=True)
 
     @staticmethod
-    def position(x: int, y: int, z: int) -> Position:
+    def position(x: int, y: int, z: int) -> PositionEnum:
         if z > 800:
-            return Position(PositionEnum.LyingBack, x, y, z)
+            return PositionEnum.LyingBack
         elif y < -600:
-            return Position(PositionEnum.LyingRight, x, y, z)
+            return PositionEnum.LyingRight
         elif y > 600:
-            return Position(PositionEnum.LyingLeft, x, y, z)
+            return PositionEnum.LyingLeft
         elif x < -500:
-            return Position(PositionEnum.Upright, x, y, z)
-        return Position(PositionEnum.Unknown, x, y, z)
+            return PositionEnum.Upright
+        return PositionEnum.Unknown
 
     @staticmethod
     def calculate_average_rr(rr_intervals: List[int]) -> float:
@@ -282,38 +270,7 @@ class PolarClientManager:
         byte_arr = data[offset:offset + length]
         return int.from_bytes(byte_arr, byteorder='little', signed=False)
 
-    def handle_accelerometer_measurement(self, value: bytearray) -> AccelerometerMeasurement:
-        flags = value[0] & 0xff
-        expected_values = 25
-
-        if len(value) < 1 + (expected_values * 2 * 3):
-            raise ValueError("Value must have enough bytes for flags and XYZ values.")
-
-        xyz_values = []
-        index = 1  # Start after the flag byte
-
-        # Extract X values
-        for _ in range(expected_values):
-            x = ((value[index + 1] & 0xFF) << 8) | (value[index] & 0xFF)
-            index += 2
-            xyz_values.append((x, 0, 0))
-
-        # Extract Y values
-        for i in range(expected_values):
-            y = ((value[index + 1] & 0xFF) << 8) | (value[index] & 0xFF)
-            index += 2
-            xyz_values[i] = (xyz_values[i][0], y, xyz_values[i][2])
-
-        # Extract Z values
-        for i in range(expected_values):
-            z = ((value[index + 1] & 0xFF) << 8) | (value[index] & 0xFF)
-            index += 2
-            xyz_values[i] = (xyz_values[i][0], xyz_values[i][1], z)
-
-        self.logger.info("Accelerometer data changed")
-        return AccelerometerMeasurement(xyz_values)
-
-    def handle_accelerometer_data(self, data: bytearray):
+    def handle_accelerometer_data(self, data: bytearray, external_timestamp: int) -> PolarAccData:
         if data[0] == 0x02:
             timestamp = int.from_bytes(data[1:9], byteorder='little') / 1e9  # timestamp of the last sample
             frame_type = data[9]
@@ -326,37 +283,42 @@ class PolarClientManager:
             offset = 0
 
             while offset < len(samples):
-                x = int.from_bytes(samples[offset:offset+step], byteorder='little', signed=True)
+                x = float(int.from_bytes(samples[offset:offset+step], byteorder='little', signed=True))
                 offset += step
-                y = int.from_bytes(samples[offset:offset+step], byteorder='little', signed=True)
+                y = float(int.from_bytes(samples[offset:offset+step], byteorder='little', signed=True))
                 offset += step
-                z = int.from_bytes(samples[offset:offset+step], byteorder='little', signed=True)
+                z = float(int.from_bytes(samples[offset:offset+step], byteorder='little', signed=True))
                 offset += step
 
                 self.accelerometer_x = x
                 self.accelerometer_y = y
                 self.accelerometer_z = z
                 sample_timestamp += time_step
+
+            position = self.position(x, y, z)
+            return PolarAccData(x=x, y=y, z=z, position=position, timestamp=external_timestamp, device_address=self.client.address)
         else:
-            self.logger.error(f"Invalid frame type: {frame_type} {data}")
+            self.logger.error(f"Invalid frame type: {data[0]} {data}", exc_info=True)
+            return None
 
     @staticmethod
-    def position(x: int, y: int, z: int) -> Position:
+    def position(x: int, y: int, z: int) -> PositionEnum:
         if z > 800:
-            return Position(PositionEnum.LyingBack, x, y, z)
+            return PositionEnum.LyingBack
         elif y < -600:
-            return Position(PositionEnum.LyingRight, x, y, z)
+            return PositionEnum.LyingRight
         elif y > 600:
-            return Position(PositionEnum.LyingLeft, x, y, z)
+            return PositionEnum.LyingLeft
         elif x < -500:
-            return Position(PositionEnum.Upright, x, y, z)
-        return Position(PositionEnum.Unknown, x, y, z)
+            return PositionEnum.Upright
+        return PositionEnum.Unknown
 
 
     async def subscribe(self):
         await self.subscribe_for_accelerometer()
         #await self.subscribe_for_heart_rate()
 
+    # N.b. accel data only arrives after 30 seconds
     async def subscribe_for_accelerometer(self):
         await self.client.write_gatt_char(PolarConstants.PMD_CONTROL_UUID, PolarConstants.POLAR_ACC_WRITE, response=True)
         await self.client.start_notify(PolarConstants.PMD_DATA_UUID, self.acc_handler, response=True)

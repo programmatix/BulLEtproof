@@ -130,14 +130,14 @@ class BLEManager:
                 await asyncio.sleep(0.1)
 
             # Check for disconnections and data inactivity
-            await self.check_device_status()
+            await self.check_client_manager_status()
 
-    async def check_device_status(self):
+    async def check_client_manager_status(self):
         current_time = time.time()
-        self.logger.info(f"Checking device status at {current_time}")
+        self.logger.info(f"Checking client manager status at {current_time}")
 
         for address, client_manager in list(self.client_managers.items()):
-            self.logger.info(f"Device {client_manager} exists for {address}")
+            self.logger.info(f"Client manager {client_manager} exists for {address}")
             client = client_manager.client
             self.logger.info(f"Checking device status for {self.get_device_name(address)} client_manager_id={client_manager.client_id}: connected={client.is_connected} last_data_received={self.last_data_received.get(address, 0)} current_time={current_time} time_since_last_data={current_time - self.last_data_received.get(address, 0)}")
             if not client.is_connected:
@@ -197,11 +197,12 @@ class BLEManager:
             self.logger.info(f"[{client_manager.client_id}] Successfully subscribed to device {device_name}")
             self.client_managers[address] = client_manager 
         except Exception as e:
-            self.logger.error(f"[{client_manager.client_id}] Failed to subscribe to device {device_name}: {e}", exc_info=True)
-            await self.queue_disconnect_device(address)
+            event_id = self.generate_event_id(address)
+            self.logger.error(f"[{event_id}] Failed to subscribe to device {device_name}: {e}", exc_info=True)
+            await self.queue_disconnect_device(address, event_id, "Failed to subscribe")
     
     def update_last_data_received(self, address):
-        self.logger.info(f"Updating last data received for {address}")
+        self.logger.info(f"Updating last data received for {self.get_device_name(address)}")
         self.last_data_received[address] = time.time()
 
 
@@ -215,20 +216,20 @@ class BLEManager:
             client_manager = self.client_managers[address]
             client: BleakClient = client_manager.client
             try:
-                self.logger.info(f"Cleaning up client manager {address}")
+                self.logger.info(f"Cleaning up client manager {self.get_device_name(address)}")
                 await client_manager.cleanup()
             except Exception as e:
-                self.logger.error(f"Error cleaning up client manager {address}: {e}", exc_info=True)
+                self.logger.error(f"Error cleaning up client manager {self.get_device_name(address)}: {e}", exc_info=True)
             finally:
                 del self.client_managers[address]
 
             try:
-                self.logger.info(f"Disconnecting client {address}")
+                self.logger.info(f"Disconnecting client {self.get_device_name(address)}")
                 await client.disconnect()
             except Exception as e:
-                self.logger.error(f"Error disconnecting client {address}: {e}", exc_info=True)
+                self.logger.error(f"Error disconnecting client {self.get_device_name(address)}: {e}", exc_info=True)
         else:
-            self.logger.warning(f"Attempted to cleanup non-existent client manager {address}")
+            self.logger.warning(f"Attempted to cleanup non-existent client manager {self.get_device_name(address)}")
 
     async def queue_disconnect_device(self, address, event_id, reason: str = None):
         await self.command_queue.put(DisconnectCommand(address, event_id, reason))
