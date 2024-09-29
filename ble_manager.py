@@ -84,20 +84,6 @@ class DisconnectCommand(BLECommand):
         self.logger.info(f"Disconnecting from device {self.address} because {self.reason}")
         await manager.cleanup_client_manager(self.address)
 
-        if self.address in manager.client_managers:
-            try:
-                await manager.client_managers[self.address].disconnect()
-            except EOFError:
-                self.logger.warning(f"EOFError while disconnecting from {self.address}. The device might have already disconnected.")
-            except Exception as e:
-                self.logger.error(f"Unexpected error while disconnecting from {self.address}: {e}", exc_info=True)
-            finally:
-                # Regardless of whether the disconnect succeeded or failed, remove the client from our list
-                del manager.client_managers[self.address]
-                self.logger.info(f"Removed device {self.address} from active clients")
-        else:
-            self.logger.warning(f"Attempted to disconnect non-existent client {self.address}")
-
 class BLEManager:
     def __init__(self, data_queue):
         self.client_managers = {} 

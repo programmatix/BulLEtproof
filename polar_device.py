@@ -81,6 +81,10 @@ class HRVResult:
     hr: int
     rr_intervals: List[int] = field(default_factory=list)
 
+# https://github.com/kieranabrennan/dont-hold-your-breath/blob/master/resources/Polar_Measurement_Data_Specification.pdf
+# Recommends:
+# Min MTU of 232 - Bluez defaults to 513
+# 2mb PHY
 class PolarClientManager:
     def __init__(self, client: BleakClient, data_queue: asyncio.Queue, client_id: str):
         self.client = client
@@ -128,27 +132,32 @@ class PolarClientManager:
         self.data_queue.put(hr_data)
 
     async def acc_handler(self, sender, data):
-        if self.dead or not self.client.is_connected:
-            return
+        try:
+            if self.dead or not self.client.is_connected:
+                self.logger.info(f"PolarClientManager {self.client_id} is dead or not connected")
+                return
 
-        self.logger.debug(f"Received ACC data from Polar device: {data.hex()}")
-        acc_data = self.handle_accelerometer_data(data)
-        if acc_data is not None:
-            pos = self.position(acc_data.x, acc_data.y, acc_data.z)
-        
-            now = datetime.now()
-            if self.last_accelerometer_data is None or now > self.last_accelerometer_data + timedelta(seconds=5):
-                self.last_accelerometer_data = now
-                timestamp = int(time.time() * 1e9)
-                acc_data = PolarAccData(
-                    x=acc_data.x,
-                    y=acc_data.y,
-                    z=acc_data.z,
-                    position=pos,
-                    timestamp=timestamp,
-                    device_address=self.client.address
-                )
-                self.data_queue.put(acc_data)
+            self.logger.info(f"Received ACC data from Polar device: {data.hex()}")
+            acc_data = self.handle_accelerometer_data(data)
+            if acc_data is not None:
+                pos = self.position(acc_data.x, acc_data.y, acc_data.z)
+            
+                now = datetime.now()
+                if self.last_accelerometer_data is None or now > self.last_accelerometer_data + timedelta(seconds=5):
+                    self.last_accelerometer_data = now
+                    timestamp = int(time.time() * 1e9)
+                    acc_data = PolarAccData(
+                        x=acc_data.x,
+                        y=acc_data.y,
+                        z=acc_data.z,
+                        position=pos,
+                        timestamp=timestamp,
+                        device_address=self.client.address
+                    )
+                    self.data_queue.put(acc_data)
+
+        except Exception as e:
+            self.logger.error(f"Error processing accelerometer data: {e}", exc_info=True)
 
     @staticmethod
     def position(x: int, y: int, z: int) -> Position:
@@ -346,15 +355,12 @@ class PolarClientManager:
 
     async def subscribe(self):
         await self.subscribe_for_accelerometer()
-        await self.subscribe_for_heart_rate()
+        #await self.subscribe_for_heart_rate()
 
     async def subscribe_for_accelerometer(self):
-        pmd_service = self.client.services.get_service(PolarConstants.PMD_SERVICE_UUID)
-        pmd_control = pmd_service.get_characteristic(PolarConstants.PMD_CONTROL_UUID)
-        pmd_data = pmd_service.get_characteristic(PolarConstants.PMD_DATA_UUID)
+        await self.client.write_gatt_char(PolarConstants.PMD_CONTROL_UUID, PolarConstants.POLAR_ACC_WRITE, response=True)
+        await self.client.start_notify(PolarConstants.PMD_DATA_UUID, self.acc_handler, response=True)
 
-        await self.client.write_gatt_char(pmd_control, PolarConstants.POLAR_ACC_WRITE)
-        await self.client.start_notify(PolarConstants.PMD_DATA_UUID, self.acc_handler)
 
     async def subscribe_for_heart_rate(self):
         hr_service = self.client.services.get_service(PolarConstants.HEART_RATE_SERVICE_UUID)
