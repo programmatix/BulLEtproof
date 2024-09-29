@@ -100,16 +100,17 @@ class CoreClientManager:
             self.logger.error(f"Error handling temperature measurement: {e}", exc_info=True)
 
     async def subscribe(self):
-        service = self.client.services.get_service(CoreConstants.CORE_TEMP_SERVICE_UUID)
-        char1 = service.get_characteristic(CoreConstants.CORE_TEMP_SERVICE_CHARACTERISTIC1_UUID)
-        cccd = char1.get_descriptor(CoreConstants.CLIENT_CHARACTERISTIC_CONFIG)
+        # service = self.client.services.get_service(CoreConstants.CORE_TEMP_SERVICE_UUID)
+        # char1 = service.get_characteristic(CoreConstants.CORE_TEMP_SERVICE_CHARACTERISTIC1_UUID)
+        # cccd = char1.get_descriptor(CoreConstants.CLIENT_CHARACTERISTIC_CONFIG)
 
-        self.logger.info(f"CORE service: {service}")
-        self.logger.info(f"CORE characteristic1: {char1}")
-        self.logger.info(f"CORE cccd: {cccd}")
+        # self.logger.info(f"CORE service: {service}")
+        # self.logger.info(f"CORE characteristic1: {char1}")
+        # self.logger.info(f"CORE cccd: {cccd}")
 
         # Don't have to write to the CCCD manually, Bleak takes care of it
         await self.client.start_notify(
             CoreConstants.CORE_TEMP_SERVICE_CHARACTERISTIC1_UUID,
-            self.core_temperature_measurement_handler
+            self.core_temperature_measurement_handler,
+            response=True
         )

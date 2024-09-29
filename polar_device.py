@@ -135,12 +135,10 @@ class PolarClientManager:
 
             timestamp = int(time.time() * 1e9)
             acc_data: PolarAccData = self.handle_accelerometer_data(data, timestamp)
-            self.logger.info(f"Received ACC data from Polar device: {data.hex()} {acc_data}")
+            self.logger.info(f"Received ACC data from Polar device: {acc_data}")
             if acc_data is not None:
                 now = datetime.now()
-                self.logger.info(f"now={now} last_accelerometer_data={self.last_accelerometer_data}")
                 if self.last_accelerometer_data is None or now > self.last_accelerometer_data + timedelta(seconds=5):
-                    self.logger.info(f"putting in queue")
                     self.last_accelerometer_data = now
                     self.data_queue.put(acc_data)
 
@@ -316,15 +314,13 @@ class PolarClientManager:
 
     async def subscribe(self):
         await self.subscribe_for_accelerometer()
-        #await self.subscribe_for_heart_rate()
+        await self.subscribe_for_heart_rate()
 
-    # N.b. accel data only arrives after 30 seconds
+    # N.b. accel data only arrives after 30 seconds for some reason
     async def subscribe_for_accelerometer(self):
         await self.client.write_gatt_char(PolarConstants.PMD_CONTROL_UUID, PolarConstants.POLAR_ACC_WRITE, response=True)
         await self.client.start_notify(PolarConstants.PMD_DATA_UUID, self.acc_handler, response=True)
 
 
     async def subscribe_for_heart_rate(self):
-        hr_service = self.client.services.get_service(PolarConstants.HEART_RATE_SERVICE_UUID)
-        hr_characteristic = hr_service.get_characteristic(PolarConstants.HEART_RATE_MEASUREMENT_UUID)
-        await self.client.start_notify(PolarConstants.HEART_RATE_MEASUREMENT_UUID, self.hr_handler)
+        await self.client.start_notify(PolarConstants.HEART_RATE_MEASUREMENT_UUID, self.hr_handler, response=True)

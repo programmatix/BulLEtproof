@@ -119,16 +119,12 @@ class ViatomClientManager:
         service = self.client.services.get_service(ViatomConstants.SERVICE_UUID)
 
         self.write_char = service.get_characteristic(ViatomConstants.WRITE_UUID)
-        self.notify_char = service.get_characteristic(ViatomConstants.NOTIFY_UUID)
-
-        self.logger.info(f"Viatom service: {service}")
-        self.logger.info(f"Viatom write char: {self.write_char}")
-        self.logger.info(f"Viatom notify char: {self.notify_char}")
 
         try:
             await self.client.start_notify(
                 ViatomConstants.NOTIFY_UUID,
-                self.data_handler
+                self.data_handler,
+                response=True
             )
             self.logger.info("Notifications started successfully")
         except Exception as e:
@@ -136,7 +132,7 @@ class ViatomClientManager:
             raise
 
         try:
-            await self.client.write_gatt_char(self.write_char.handle, ViatomConstants.WRITE_BYTES, response=False)
+            await self.client.write_gatt_char(ViatomConstants.WRITE_UUID, ViatomConstants.WRITE_BYTES, response=True)
             self.logger.info("Write command sent successfully")
         except Exception as e:
             self.logger.error(f"Failed to write to characteristic: {e}")

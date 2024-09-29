@@ -111,14 +111,17 @@ class BLEManager:
     async def run(self):
         while True:
             # Process any due scheduled tasks
-            current_time = asyncio.get_event_loop().time()
-            due_tasks = [task for task in self.scheduled_tasks if task[0] <= current_time]
-            next_due_task = min(self.scheduled_tasks, key=lambda x: x[0]) if len(self.scheduled_tasks) > 0 else None   
-            self.logger.info(f"Due tasks: {len(due_tasks)} out of {len(self.scheduled_tasks)} next task due in {(next_due_task[0] - current_time) if next_due_task else 'None'} seconds")
-            for task in due_tasks:
-                self.logger.info(f"Adding due task to command queue: {task[1]}")
-                self.scheduled_tasks.remove(task)
-                await self.command_queue.put(task[1])
+            try:
+                current_time = asyncio.get_event_loop().time()
+                due_tasks = [task for task in self.scheduled_tasks if task[0] <= current_time]
+                next_due_task = min(self.scheduled_tasks, key=lambda x: x[0]) if len(self.scheduled_tasks) > 0 else None   
+                self.logger.info(f"Due tasks: {len(due_tasks)} out of {len(self.scheduled_tasks)} next task due in {(next_due_task[0] - current_time) if next_due_task else 'None'} seconds")
+                for task in due_tasks:
+                    self.logger.info(f"Moving due task to command queue: {task[1]}")
+                    self.scheduled_tasks.remove(task)
+                    await self.command_queue.put(task[1])
+            except Exception as e:
+                self.logger.error(f"Error processing due tasks: {e}", exc_info=True)
 
             # Process commands from the queue
             try:
@@ -129,8 +132,11 @@ class BLEManager:
                 # No commands in the queue, continue to next iteration
                 await asyncio.sleep(0.1)
 
-            # Check for disconnections and data inactivity
-            await self.check_client_manager_status()
+            try:
+                # Check for disconnections and data inactivity
+                await self.check_client_manager_status()
+            except Exception as e:
+                self.logger.error(f"Error checking client manager status: {e}", exc_info=True)
 
     async def check_client_manager_status(self):
         current_time = time.time()

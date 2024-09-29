@@ -65,6 +65,7 @@ data_processor.start()
 startup_complete = False
 
 
+# This started life intended to be a webapp (hence the use of FastAPI and lifecycle events) but that has not yet been implemented...
 @app.on_event("startup")
 async def startup_event():
     global startup_complete
@@ -74,80 +75,11 @@ async def startup_event():
         viatom_device_address = os.getenv('VIATOM_DEVICE_ADDRESS')
         core_device_address = os.getenv('CORE_DEVICE_ADDRESS')
         polar_device_address = os.getenv('POLAR_DEVICE_ADDRESS')
-        #await ble_manager.queue_connect_to_specific_device(viatom_device_address, event_id="startup", reason="Startup")
-        #await ble_manager.queue_connect_to_specific_device(core_device_address, event_id="startup", reason="Startup")
+        await ble_manager.queue_connect_to_specific_device(core_device_address, event_id="startup", reason="Startup")
         await ble_manager.queue_connect_to_specific_device(polar_device_address, event_id="startup", reason="Startup")
+        await ble_manager.queue_connect_to_specific_device(viatom_device_address, event_id="startup", reason="Startup")
         startup_complete = True
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Shutting down")
-    influx_manager.close()
-    mqtt_manager.close()
-
-@app.post("/connect/{address}")
-async def connect_device(address: str):
-    def connect_and_subscribe():
-        success = yield from ble_manager.connect_device(address)
-        if success:
-            client = ble_manager.clients[address]
-            if "Checkme" in client.name:
-                device = ViatomDevice(client)
-            elif "Polar" in client.name:
-                device = PolarDevice(client)
-            elif "CORE" in client.name:
-                device = CoreDevice(client)
-            else:
-                logger.warning(f"Unknown device type: {client.name}")
-                return
-
-            yield from device.subscribe()
-
-    ble_manager.add_task(connect_and_subscribe())
-    return {"success": True}
-
-@app.post("/disconnect/{address}")
-async def disconnect_device(address: str):
-    ble_manager.add_task(ble_manager.queue_disconnect_device(address))
-    return {"success": True}
-
-@app.websocket("/ws/{address}")
-async def websocket_endpoint(websocket: WebSocket, address: str):
-    await websocket.accept()
-
-    def notification_handler(sender, data):
-        processed_data = process_data(sender, data)
-        asyncio.create_task(websocket.send_text(json.dumps(processed_data.__dict__)))
-        write_to_influx(sender, processed_data)
-        publish_to_mqtt(sender, processed_data)
-
-    client = ble_manager.clients[address]
-    client.set_disconnected_callback(notification_handler)
-
-    try:
-        while True:
-            await websocket.receive_text()
-    except:
-        logger.info(f"WebSocket connection closed for device {address}")
-
-def process_data(sender, data):
-    if isinstance(sender, ViatomDevice):
-        return sender.data_handler(sender.client, data)
-    elif isinstance(sender, PolarDevice):
-        if len(data) == 2:
-            return sender.hr_handler(sender.client, data)
-        else:
-            return sender.rr_handler(sender.client, data)
-    elif isinstance(sender, CoreDevice):
-        return sender.temp_handler(sender.client, data)
-
-def write_to_influx(sender, data):
-    measurement = type(sender).__name__.lower().replace('device', '')
-    influx_manager.write_data(measurement, data.__dict__, tags={"device": sender.client.address})
-
-def publish_to_mqtt(sender, data):
-    topic = f"sensors/{type(sender).__name__.lower().replace('device', '')}/{sender.client.address}"
-    mqtt_manager.publish_data(topic, data.__dict__)
 
 # Start data processing in a separate thread
 import threading
