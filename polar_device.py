@@ -248,7 +248,7 @@ class PolarClientManager:
         # self.logger.info(f"HRV calculations: rmssd_very_recent={hrv_rmssd_very_recent}, rmssd_somewhat_recent={hrv_rmssd_somewhat_recent}, rmssd_less_recent={hrv_rmssd_less_recent}")
         # self.logger.info(f"HRV calculations: sd_very_recent={hrv_sd_very_recent}, sd_somewhat_recent={hrv_sd_somewhat_recent}, sd_less_recent={hrv_sd_less_recent}")
 
-        self.logger.info(f"HR: {heart_rate} rrIntervals: {rr_intervals} rmssd={hrv_rmssd_very_recent} sdnn={hrv_sd_very_recent} recent={[entry[1] for entry in very_recent_hrv_entries]}")
+        self.logger.info(f"HR: {heart_rate} rrIntervals: {rr_intervals} rmssd={hrv_rmssd_very_recent} sdnn={hrv_sd_very_recent}")
 
         return HRVResult(
             hrv_rmssd_very_recent,

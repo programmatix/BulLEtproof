@@ -15,6 +15,8 @@ class MQTTManager:
         self.connect_thread.start()
         self.client.enable_logger(logging.getLogger("paho.mqtt"))
         logging.getLogger("paho.mqtt").setLevel(logging.DEBUG)
+        self.client.tls_set_context(None)
+        self.client.tls_insecure_set(True)
 
     def _connect_loop(self):
         while True:
@@ -23,8 +25,6 @@ class MQTTManager:
                     time.sleep(5)
                     continue
                 self.logger.info("Connecting to MQTT broker")
-                self.client.tls_set_context(None)
-                self.client.tls_insecure_set(True)
                 self.client.connect(os.getenv('MQTT_HOST'), int(os.getenv('MQTT_PORT')))
                 self.client.loop_start()
                 self.logger.info("Connected to MQTT broker")

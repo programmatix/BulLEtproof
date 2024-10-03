@@ -66,15 +66,24 @@ class ConnectCommand(BLECommand):
         next_attempt = self.attempt + 1
         wait_time = min(60, 2 ** next_attempt)
         self.logger.info(f"Scheduling next connection attempt to {device_name} in {wait_time} seconds")
-        await manager.schedule_command(ConnectCommand(self.address, self.event_id, self.reason, next_attempt), wait_time)
+        
+        # Check if there's already a ConnectCommand for this address
+        existing_connect_commands = [task for task in manager.scheduled_tasks 
+                                     if isinstance(task[1], ConnectCommand) and task[1].address == self.address]
+        
+        if not existing_connect_commands:
+            await manager.schedule_command(ConnectCommand(self.address, self.event_id, self.reason, next_attempt), wait_time)
+        else:
+            self.logger.info(f"Skipping scheduling new ConnectCommand for {device_name} as one already exists")
 
         return False
 
 class DisconnectCommand(BLECommand):
-    def __init__(self, address, event_id: str, reason: str = None):
+    def __init__(self, address, client: BleakClient, event_id: str, reason: str = None):
         self.address = address
         self.event_id = event_id
         self.reason = reason
+        self.client = client
         self.logger = logging.getLogger(__name__ + "." + event_id)
 
     def __str__(self):
@@ -82,7 +91,10 @@ class DisconnectCommand(BLECommand):
 
     async def execute(self, manager):
         self.logger.info(f"Disconnecting from device {self.address} because {self.reason}")
-        await manager.cleanup_client_manager(self.address)
+        try:
+            await self.client.disconnect()
+        except Exception as e:
+            self.logger.error(f"Error disconnecting client {self.get_device_name(self.address)}: {e}", exc_info=True)
 
 class BLEManager:
     def __init__(self, data_queue):
@@ -233,16 +245,13 @@ class BLEManager:
                 self.logger.error(f"Error cleaning up client manager {self.get_device_name(address)}: {e}", exc_info=True)
             finally:
                 del self.client_managers[address]
-
-            try:
-                self.logger.info(f"Disconnecting client {self.get_device_name(address)}")
-                await client.disconnect()
-            except Exception as e:
-                self.logger.error(f"Error disconnecting client {self.get_device_name(address)}: {e}", exc_info=True)
         else:
             self.logger.warning(f"Attempted to cleanup non-existent client manager {self.get_device_name(address)}")
 
     async def queue_disconnect_device(self, address, event_id, reason: str = None):
+        # Delete the client manager straightaway as otherwise on the next pass of check_client_manager_status it could still exist and
+        # generate another reconnect thread
+        self.cleanup_client_manager(address)
         await self.command_queue.put(DisconnectCommand(address, event_id, reason))
 
     async def schedule_command(self, command, delay):

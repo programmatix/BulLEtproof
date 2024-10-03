@@ -11,6 +11,7 @@ import asyncio
 import json
 from dotenv import load_dotenv
 import logging
+from logging.handlers import TimedRotatingFileHandler
 from contextlib import asynccontextmanager
 import sys
 from ble_manager import BLEManager
@@ -18,10 +19,10 @@ from queue import Queue
 from data_processor import DataProcessor
 import urllib3
 import warnings
+import time
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 load_dotenv()
-
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', force=True)
@@ -31,13 +32,35 @@ logger = logging.getLogger(__name__)
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
 
+# Create a TimedRotatingFileHandler for daily rollover
+log_filename = 'logs/app.log'
+file_handler = TimedRotatingFileHandler(
+    filename=log_filename,
+    when='midnight',
+    interval=1,
+    backupCount=30,  # Keep logs for 30 days
+    encoding='utf-8'
+)
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+# Set the suffix of the log file
+file_handler.suffix = "%Y-%m-%d"
+
+# Set the extMatch with a custom function to include the date in the rotated file names
+def namer(default_name):
+    base_filename, ext, date = default_name.split(".")
+    return f"{base_filename}.{date}.{ext}"
+
+file_handler.namer = namer
+
 # Create a stream handler for stdout
 stdout_handler = logging.StreamHandler(sys.stdout)
 stdout_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-stdout_handler.setFormatter(formatter)
+stdout_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
-# Add the stdout handler to the root logger
+# Add both handlers to the root logger
+logging.getLogger().addHandler(file_handler)
 logging.getLogger().addHandler(stdout_handler)
 
 app = FastAPI()
