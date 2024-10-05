@@ -5,6 +5,7 @@ import time
 from queue import Queue
 from ble_command import SharedData
 
+from constants import get_device_name
 from constants import UUIDs
 
 @dataclass
@@ -21,16 +22,17 @@ class CoreConstants:
     TEMPERATURE_MEASUREMENT_CHARACTERISTIC_UUID = "00002102-5b1e-4347-b07c-97b514dae121"
 
 class CoreClientManager:
-    def __init__(self, client, data_queue: asyncio.Queue, client_id: str):
+    def __init__(self, client, data_queue: asyncio.Queue, client_id: str, address: str):
         self.client = client
         self.logger = logging.getLogger(f"{__name__}.{client_id}")
         self.data_queue = data_queue
         self.client_id = client_id
         self.logger.info(f"CoreClientManager initialized with client_id: {client_id}")
         self.dead = False
+        self.address = address
 
     def __str__(self):
-        return f"CoreClientManager(client_id={self.client_id})"
+        return f"CoreClientManager(client_id={self.client_id}, address={get_device_name(self.address)})"
 
     def __del__(self):
         self.logger.info(f"CoreClientManager {self.client_id} being deleted")

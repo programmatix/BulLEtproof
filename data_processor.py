@@ -100,7 +100,7 @@ class DataProcessor:
             },
             "fields": {
                 "hr": viatom_data.hr,
-                "spo2": viatom_data.spo2,
+                "o2": viatom_data.spo2,
                 "pi": viatom_data.perfusion_index,
                 "battery": viatom_data.battery,
                 "movement": viatom_data.movement

@@ -11,6 +11,8 @@ import math
 from enum import Enum
 from typing import List, Tuple
 
+from constants import get_device_name
+
 @dataclass
 class PolarHRData(SharedData):
     hr: int
@@ -82,7 +84,7 @@ class HRVResult:
 # Min MTU of 232 - Bluez defaults to 513
 # 2mb PHY
 class PolarClientManager:
-    def __init__(self, client: BleakClient, data_queue: asyncio.Queue, client_id: str):
+    def __init__(self, client: BleakClient, data_queue: asyncio.Queue, client_id: str, address: str):
         self.client = client
         self.data_queue = data_queue
         self.logger = logging.getLogger(f"{__name__}.{client_id}")
@@ -92,10 +94,11 @@ class PolarClientManager:
         self.dead = False
         self.hr_entries = []
         self.hrv_entries = []
+        self.address = address
         self.logger.info(f"PolarClientManager initialized with client_id: {client_id}")
 
     def __str__(self):
-        return f"PolarClientManager(client_id={self.client_id})"
+        return f"PolarClientManager(client_id={self.client_id}, address={get_device_name(self.address)})"
 
     async def cleanup(self):
         self.logger.info(f"PolarClientManager {self.client_id} being cleaned up")

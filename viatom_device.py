@@ -7,6 +7,7 @@ from ble_command import SharedData
 from bleak import BleakClient
 
 from ble_command import BLECommand
+from constants import get_device_name
 from constants import UUIDs
 
 @dataclass
@@ -25,7 +26,7 @@ class ViatomConstants:
     WRITE_BYTES = bytearray([0xaa, 0x17, 0xe8, 0x00, 0x00, 0x00, 0x00, 0x1b])    
 
 class ViatomClientManager:
-    def __init__(self, client, data_queue, ble_manager, client_id: str):
+    def __init__(self, client, data_queue, ble_manager, client_id: str, address: str):
         self.client = client
         self.data_queue = data_queue
         self.ble_manager = ble_manager
@@ -35,9 +36,10 @@ class ViatomClientManager:
         self.future_request_more_data = None
         self.logger.info(f"ViatomClientManager initialized with client_id: {client_id}")
         self.dead = False
+        self.address = address
 
     def __str__(self):
-        return f"ViatomClientManager(client_id={self.client_id})"
+        return f"ViatomClientManager(client_id={self.client_id}, address={get_device_name(self.address)})"
 
     async def cleanup(self):
         self.logger.info(f"ViatomClientManager {self.client_id} being cleaned up")
@@ -103,6 +105,9 @@ class ViatomClientManager:
     class RequestMoreDataCommand(BLECommand):
         def __init__(self, viatom_device):
             self.viatom_device = viatom_device
+
+        def __str__(self):
+            return f"RequestMoreDataCommand(viatom_device={self.viatom_device.address})"
 
         async def execute(self, manager):
             if self.viatom_device.dead:
