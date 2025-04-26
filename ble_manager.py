@@ -179,6 +179,9 @@ class BLEManager:
             else:
                 status = f"{get_device_name(address)}: Connected, last data {time_since_last_data:.1f}s ago"
 
+            if status is not None:
+                client_manager.status = status
+                
             if reason is not None:
                 await self.disconnect_and_cleanup_and_queue_reconnect(client_manager, address, event_id, reason)
 
@@ -298,3 +301,13 @@ class BLEManager:
         for client_manager in self.client_managers:
             event_id = self.generate_event_id(client_manager.address)
             await self.disconnect_and_cleanup_client_manager(client_manager, event_id, "Shutting down")
+
+    def get_client_manager(self, device_address):
+        """
+        Retrieve the client manager for the given device address.
+        Returns None if no matching client manager is found.
+        """
+        for client_manager in self.client_managers:
+            if client_manager.address == device_address:
+                return client_manager
+        return None
