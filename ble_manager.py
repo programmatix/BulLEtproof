@@ -1,5 +1,6 @@
 import asyncio
 import time
+import sys
 from bleak import BleakScanner, BleakClient
 from bleak.exc import BleakError
 import logging
@@ -103,43 +104,51 @@ class BLEManager:
         return str(uuid.uuid4())[:8] 
 
     async def run(self):
-        while True:
-            # Process any due scheduled tasks
-            try:
-                current_time = asyncio.get_event_loop().time()
-                due_tasks = [task for task in self.scheduled_tasks if task[0] <= current_time]
-                next_due_task = min(self.scheduled_tasks, key=lambda x: x[0]) if len(self.scheduled_tasks) > 0 else None   
-                self.logger.debug(f"Due tasks: {len(due_tasks)} out of {len(self.scheduled_tasks)} next task due in {(next_due_task[0] - current_time) if next_due_task else 'None'} seconds")
-                for task in due_tasks:
-                    self.logger.info(f"Moving due task to command queue: {str(task[1])}")
-                    self.scheduled_tasks.remove(task)
-                    await self.command_queue.put(task[1])
-                if len(self.scheduled_tasks) < 10:
-                    for scheduled_task in self.scheduled_tasks:
-                        self.logger.debug(f"Remaining scheduled task: {str(scheduled_task[1])} due in {(scheduled_task[0] - current_time) if scheduled_task else 'None'} seconds")
-            except Exception as e:
-                self.logger.error(f"Error processing due tasks: {e}")
+        logger = logging.getLogger("ble_queue")
+        try:
+            while True:
+                # Process any due scheduled tasks
+                try:
+                    current_time = asyncio.get_event_loop().time()
+                    due_tasks = [task for task in self.scheduled_tasks if task[0] <= current_time]
+                    next_due_task = min(self.scheduled_tasks, key=lambda x: x[0]) if len(self.scheduled_tasks) > 0 else None   
+                    logger.debug(f"Due tasks: {len(due_tasks)} out of {len(self.scheduled_tasks)} next task due in {(next_due_task[0] - current_time) if next_due_task else 'None'} seconds")
+                    for task in due_tasks:
+                        logger.info(f"Moving due task to command queue: {str(task[1])}")
+                        self.scheduled_tasks.remove(task)
+                        await self.command_queue.put(task[1])
+                    if len(self.scheduled_tasks) < 10:
+                        for scheduled_task in self.scheduled_tasks:
+                            logger.debug(f"Remaining scheduled task: {str(scheduled_task[1])} due in {(scheduled_task[0] - current_time) if scheduled_task else 'None'} seconds")
+                except Exception as e:
+                    self.logger.error(f"Error processing due tasks: {e}")
 
-            # Process commands from the queue
-            self.logger.debug(f"Processing commands from the queue which has {self.command_queue.qsize()} items")
-            try:
-                command = await asyncio.wait_for(self.command_queue.get(), timeout=1.0)
-                self.logger.debug(f"Processing command: {command}")
-                await command.execute(self)
-                self.command_queue.task_done()
-            except asyncio.TimeoutError:
-                self.logger.debug(f"No commands in the queue at {time.time()}")
-                await asyncio.sleep(0.1)
+                # Process commands from the queue
+                logger.debug(f"Processing commands from the queue which has {self.command_queue.qsize()} items")
+                try:
+                    command = await asyncio.wait_for(self.command_queue.get(), timeout=1.0)
+                    logger.debug(f"Processing command: {command}")
+                    await command.execute(self)
+                    self.command_queue.task_done()
+                except asyncio.TimeoutError:
+                    logger.debug(f"No commands in the queue at {time.time()}")
+                    await asyncio.sleep(0.1)
 
-            try:
-                # Check for disconnections and data inactivity
-                await self.check_client_manager_status()
-            except Exception as e:
-                self.logger.error(f"Error checking client manager status: {e}")
+                try:
+                    # Check for disconnections and data inactivity
+                    await self.check_client_manager_status()
+                except Exception as e:
+                    logger.error(f"Error checking client manager status: {e}")
+
+        except Exception as e:
+            logger.error(f"Terminal error in BLEManager queue processing - should never happen!!: {e}")
+            sys.exit(1)
 
     async def check_client_manager_status(self):
+        logger = logging.getLogger("ble_managers")
+
         current_time = time.time()
-        self.logger.debug(f"Checking client manager status at {current_time} have {len(self.client_managers)} client managers")
+        logger.debug(f"Checking client manager status at {current_time} have {len(self.client_managers)} client managers")
         device_statuses = []
 
         # Group client managers by address
@@ -153,7 +162,7 @@ class BLEManager:
         for address, managers in client_managers_by_address.items():
             # Remove extra client managers if there are more than one for the same address
             if len(managers) > 1:
-                self.logger.warning(f"Found {len(managers)} client managers for {get_device_name(address)}. Removing extras.")
+                logger.warning(f"Found {len(managers)} client managers for {get_device_name(address)}. Removing extras.")
                 for extra_manager in managers[1:]:
                     await self.disconnect_and_cleanup_client_manager(extra_manager, self.generate_event_id(address), "Removing extra client manager")
                 managers = [managers[0]]
@@ -179,16 +188,16 @@ class BLEManager:
             else:
                 status = f"{get_device_name(address)}: Connected, last data {time_since_last_data:.1f}s ago"
 
-            if status is not None:
-                client_manager.status = status
-                
+
+            logger.debug(f"Device status for {get_device_name(address)}: {status}")
+
             if reason is not None:
                 await self.disconnect_and_cleanup_and_queue_reconnect(client_manager, address, event_id, reason)
 
-            device_statuses.append(status)
+            if status is not None:
+                client_manager.status = status                
 
-        summary = " | ".join(device_statuses)
-        self.logger.debug(f"Device status summary: {summary}")
+            device_statuses.append(status)
 
     async def disconnect_and_cleanup_and_queue_reconnect(self, client_manager, address, event_id, reason: str = None, delete_client_manager: bool = True):
         logger = get_device_logger(address)
@@ -201,10 +210,11 @@ class BLEManager:
         await self.queue_connect(address, event_id, reason)
 
     async def queue_connect(self, address, event_id, reason: str = None):
-        self.logger.info(f"Queueing connect for {get_device_name(address)} because {reason}")
+        logger = get_device_logger(address)
+        logger.info(f"Queueing connect for {get_device_name(address)} because {reason}")
         existing_connect_commands = [task for task in self.scheduled_tasks if isinstance(task[1], ConnectCommand) and task[1].address == address]
         if existing_connect_commands:
-            self.logger.info(f"Skipping scheduling new ConnectCommand for {get_device_name(address)} as one already exists")
+            logger.info(f"Skipping scheduling new ConnectCommand for {get_device_name(address)} as one already exists")
         else:
             await self.command_queue.put(ConnectCommand(address, event_id, reason))
 
@@ -231,6 +241,33 @@ class BLEManager:
         logger.info(f"Handling post connection for device {address}")
         self.update_last_data_received(address)
         device_name = get_device_name(address)
+        
+        # Ensure services are discovered before proceeding
+        try:
+            logger.info(f"Discovering services for device {device_name}...")
+            # Some BLE implementations might need explicit service discovery
+            if hasattr(client, 'get_services'):
+                await client.get_services()
+            elif hasattr(client, 'discover_services'):
+                await client.discover_services()
+            else:
+                # If no explicit discovery method, wait a moment for automatic discovery
+                logger.info(f"No explicit discovery method, waiting for automatic discovery")
+                await asyncio.sleep(2)
+                
+            # Log discovered services - don't use len() directly
+            if client.services:
+                # Count services by iterating
+                services_list = list(client.services)
+                service_count = len(services_list)
+                logger.info(f"Found {service_count} services on device {device_name}")
+                for service in services_list:
+                    logger.info(f"Service: {service.uuid}")
+            else:
+                logger.warning(f"No services found on device {device_name} after discovery")
+        except Exception as e:
+            logger.error(f"Error discovering services for device {device_name}: {e}")
+            # Continue anyway as the client might have automatically discovered services
         
         client_manager = await self.create_client_manager(client, address)
         if client_manager is None:
@@ -267,7 +304,9 @@ class BLEManager:
         client: BleakClient = client_manager.client
         logger.info(f"Disconnecting from device {address} because {reason}")
         try:
-            await client.disconnect()
+            await asyncio.wait_for(client.disconnect(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout while disconnecting from {get_device_name(address)}")
         except Exception as e:
             logger.error(f"Error disconnecting client {get_device_name(address)}: {e}")
 

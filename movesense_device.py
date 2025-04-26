@@ -124,15 +124,30 @@ class MovesenseClientManager:
                 device_address=self.address
             ))
         elif packet_type == MovesenseConstants.PACKET_TYPE_DATA and reference == MovesenseConstants.REF_HR:  # HR data
-            hr_value = d.get_uint_8(2)  # 1 byte for HR value
-            rr_interval = d.get_uint_16(3) if len(data) >= 5 else None  # 2 bytes for RR interval
-            self.logger.debug(f"HR Data: HR={hr_value} BPM, RR={rr_interval} ms")
-            self.data_queue.put(MovesenseHRData(
-                hr=float(hr_value),
-                rr_intervals=[float(rr_interval)] if rr_interval else [],
+            buffer_len = len(data) - 2  # Subtract packet type and reference bytes
+            buffer = data[2:]
+            
+            hr_data = MovesenseHRData(
+                hr=0.0,
+                rr_intervals=[],
                 timestamp=int(time.time() * 1e9),
                 device_address=self.address
-            ))
+            )
+            
+            # First comes the float average (4 bytes) - get HR value from this float
+            if len(buffer) >= 4:
+                hr_data.hr = d.get_float_32(2)  # Offset 2 in original data (after packet_type and reference)
+                pos = 6  # Start position for RR data (2 + 4)
+                
+                # Then comes the array of uint16 RR intervals
+                while pos + 1 < len(data):
+                    rr_interval = d.get_uint_16(pos)
+                    pos += 2
+                    
+                    hr_data.rr_intervals.append(float(rr_interval))
+            
+            self.logger.debug(f"HR Data: HR={hr_data.hr} BPM, RR={hr_data.rr_intervals if hr_data.rr_intervals else 'none'} ms")
+            self.data_queue.put(hr_data)
         elif packet_type == MovesenseConstants.PACKET_TYPE_COMMAND_RESPONSE:  # COMMAND_RESPONSE
             status_code = d.get_uint_16(2)
             self.logger.info(f"Command Response: Reference={reference} ({ref}), Status={status_code}")

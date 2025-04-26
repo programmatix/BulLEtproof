@@ -51,7 +51,20 @@ class MemoryLogHandler(logging.Handler):
                 LOG_BUFFER['system'].pop(0)
 
 # Create a stream handler for stdout
-stdout_handler = logging.StreamHandler(sys.stdout)
+class IgnoreBrokenPipeHandler(logging.StreamHandler):
+    def emit(self, record):
+        try:
+            super().emit(record)
+        except BrokenPipeError:
+            pass
+
+    def flush(self):
+        try:
+            super().flush()
+        except BrokenPipeError:
+            pass
+
+stdout_handler = IgnoreBrokenPipeHandler(sys.stdout)
 stdout_handler.setLevel(logging.DEBUG)
 stdout_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)-20s - %(levelname)-8s - %(message)s'))
 
@@ -67,10 +80,20 @@ logging.basicConfig(
     handlers=[stdout_handler, memory_handler]
 )
 
+# Function to set log level
+def set_log_level(level):
+    logging.getLogger().setLevel(level)
+    stdout_handler.setLevel(level)
+    memory_handler.setLevel(level)
+
 # Get the logger for this module
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# Configure logging for FastAPI
+app.logger = logging.getLogger("uvicorn.access")
+app.logger.setLevel(logging.DEBUG)
 
 app.add_middleware(
     CORSMiddleware,

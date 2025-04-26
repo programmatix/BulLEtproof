@@ -47,10 +47,10 @@ class DataProcessor:
                     self.process_polar_acc_for_influx(data)
                     self.process_polar_acc_for_mqtt(data)
                 elif isinstance(data, MovesenseHRData): 
-                    #self.process_movesense_hr_for_influx(data)
+                    self.process_movesense_hr_for_influx(data)
                     self.process_movesense_hr_for_mqtt(data)
                 elif isinstance(data, MovesenseAccelData):
-                    #self.process_movesense_accel_for_influx(data)
+                    self.process_movesense_accel_for_influx(data)
                     self.process_movesense_accel_for_mqtt(data)
                 else:
                     self.logger.warning(f"Unknown data type: {data}")

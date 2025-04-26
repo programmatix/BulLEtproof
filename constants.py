@@ -20,5 +20,7 @@ def get_device_name(address: str) -> str:
         return f"Viatom(address={address})"
     elif address == os.getenv('POLAR_DEVICE_ADDRESS'):
         return f"Polar(address={address})"
+    elif address == os.getenv('MOVESENSE_DEVICE_ADDRESS'):
+        return f"Movesense(address={address})"
 
     return address

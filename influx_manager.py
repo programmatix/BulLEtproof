@@ -16,10 +16,10 @@ class InfluxManager:
         self.logger = logging.getLogger(__name__)
 
     def write_data(self, data):
-        self.logger.info(f"Writing data to InfluxDB: {data}")
+        self.logger.debug(f"Writing data to InfluxDB: {data}")
         try:
             self.client.write_points([data])
-            self.logger.info(f"Successfully wrote data to InfluxDB: {data}")
+            self.logger.debug(f"Successfully wrote data to InfluxDB: {data}")
         except Exception as e:
             self.logger.error(f"Error writing to InfluxDB: {e}", exc_info=True)
             self.logger.info(f"Failed data point: {data}")

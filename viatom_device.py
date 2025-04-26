@@ -30,7 +30,7 @@ class ViatomClientManager:
         self.client = client
         self.data_queue = data_queue
         self.ble_manager = ble_manager
-        self.logger = logging.getLogger(f"{__name__}.{client_id}")
+        self.logger = logging.getLogger(f"viatom.{client_id}")
         self.write_char = None
         self.client_id = client_id
         self.future_request_more_data = None
