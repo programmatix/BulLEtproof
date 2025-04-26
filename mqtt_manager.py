@@ -13,8 +13,8 @@ class MQTTManager:
         self.connected = False
         self.connect_thread = threading.Thread(target=self._connect_loop, daemon=True)
         self.connect_thread.start()
-        self.client.enable_logger(logging.getLogger("paho.mqtt"))
-        logging.getLogger("paho.mqtt").setLevel(logging.DEBUG)
+        # self.client.enable_logger(logging.getLogger("paho.mqtt"))
+        # logging.getLogger("paho.mqtt").setLevel(logging.DEBUG)
         self.client.tls_set_context(None)
         self.client.tls_insecure_set(True)
 
@@ -34,15 +34,15 @@ class MQTTManager:
                 time.sleep(5)  # Wait 5 seconds before trying again
 
     def publish_data(self, topic, data):
-        self.logger.info(f"Publishing data to MQTT: {topic} {data}")
+        #self.logger.debug(f"Publishing data to MQTT: {topic} {data}")
         if not self.connected:
             self.logger.warning("Not connected to MQTT broker. Message not sent.")
             return
         try:
             msg = self.client.publish(topic, json.dumps(data), retain=True)
-            self.logger.info(f"Waiting for data to be published: {data} {msg.rc}")
+            #self.logger.debug(f"Waiting for data to be published: {data} {msg.rc}")
             msg.wait_for_publish()
-            self.logger.info(f"Data published: {data}")
+            #self.logger.debug(f"Data published: {data}")
         except Exception as e:
             self.logger.error(f"Error publishing to MQTT: {e}", exc_info=True)
             self.connected = False

@@ -27,13 +27,13 @@ load_dotenv()
 
 # Create a stream handler for stdout
 stdout_handler = logging.StreamHandler(sys.stdout)
-stdout_handler.setLevel(logging.INFO)
-stdout_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+stdout_handler.setLevel(logging.DEBUG)
+stdout_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)-20s - %(levelname)-8s - %(message)s'))
 
 # Configure the root logger
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)-20s - %(levelname)-8s - %(message)s',
     handlers=[stdout_handler]
 )
 
@@ -75,9 +75,11 @@ async def startup_event():
         viatom_device_address = os.getenv('VIATOM_DEVICE_ADDRESS')
         core_device_address = os.getenv('CORE_DEVICE_ADDRESS')
         polar_device_address = os.getenv('POLAR_DEVICE_ADDRESS')
-        await ble_manager.queue_connect_to_specific_device(core_device_address, event_id="startup", reason="Startup")
-        await ble_manager.queue_connect_to_specific_device(polar_device_address, event_id="startup", reason="Startup")
-        await ble_manager.queue_connect_to_specific_device(viatom_device_address, event_id="startup", reason="Startup")
+        movesense_device_address = os.getenv('MOVESENSE_DEVICE_ADDRESS')
+        # await ble_manager.queue_connect_to_specific_device(core_device_address, event_id="startup", reason="Startup")
+        # await ble_manager.queue_connect_to_specific_device(polar_device_address, event_id="startup", reason="Startup")
+        # await ble_manager.queue_connect_to_specific_device(viatom_device_address, event_id="startup", reason="Startup")
+        await ble_manager.queue_connect_to_specific_device(movesense_device_address, event_id="startup", reason="Startup")
         startup_complete = True
 
 
@@ -85,6 +87,11 @@ async def startup_event():
 import threading
 processing_thread = threading.Thread(target=data_processor.process_data, daemon=True)
 processing_thread.start()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Disconnecting all BLE devices")
+    await ble_manager.disconnect_all_devices()
 
 if __name__ == "__main__":
     import uvicorn

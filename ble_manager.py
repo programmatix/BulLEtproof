@@ -9,10 +9,12 @@ import os
 from dotenv import load_dotenv
 import threading
 import uuid
+from ble_logging import get_device_logger
 
 from core_device import CoreClientManager
 from polar_device import PolarClientManager
 from viatom_device import ViatomClientManager
+from movesense_device import MovesenseClientManager
 from ble_command import BLECommand
 from constants import get_device_name
 load_dotenv()
@@ -40,10 +42,10 @@ class ConnectCommand(BLECommand):
         self.attempt = attempt
         self.event_id = event_id
         self.reason = reason
-        self.logger = logging.getLogger(__name__ + "." + event_id)
+        self.logger = get_device_logger(address)
 
     def __str__(self):
-        return f"ConnectCommand[address={self.address}, attempt={self.attempt}, event_id={self.event_id}, reason={self.reason}]"
+        return f"ConnectCommand[address={get_device_name(self.address)}, attempt={self.attempt}, event_id={self.event_id}, reason={self.reason}]"
 
     async def execute(self, manager):
         device_name = get_device_name(self.address)
@@ -63,7 +65,7 @@ class ConnectCommand(BLECommand):
             # Probably just cannot connect
             self.logger.info(f"BleakError on attempt {self.attempt + 1} connecting to device {device_name}: {e}")
         except Exception as e:
-            self.logger.error(f"Unexpected error on attempt {self.attempt + 1} connecting to device {device_name}: {e}", exc_info=True)
+            self.logger.error(f"Unexpected error on attempt {self.attempt + 1} connecting to device {device_name}: {e}")
 
         # Schedule next connection attempt
         next_attempt = self.attempt + 1
@@ -107,37 +109,37 @@ class BLEManager:
                 current_time = asyncio.get_event_loop().time()
                 due_tasks = [task for task in self.scheduled_tasks if task[0] <= current_time]
                 next_due_task = min(self.scheduled_tasks, key=lambda x: x[0]) if len(self.scheduled_tasks) > 0 else None   
-                self.logger.info(f"Due tasks: {len(due_tasks)} out of {len(self.scheduled_tasks)} next task due in {(next_due_task[0] - current_time) if next_due_task else 'None'} seconds")
+                self.logger.debug(f"Due tasks: {len(due_tasks)} out of {len(self.scheduled_tasks)} next task due in {(next_due_task[0] - current_time) if next_due_task else 'None'} seconds")
                 for task in due_tasks:
                     self.logger.info(f"Moving due task to command queue: {str(task[1])}")
                     self.scheduled_tasks.remove(task)
                     await self.command_queue.put(task[1])
                 if len(self.scheduled_tasks) < 10:
                     for scheduled_task in self.scheduled_tasks:
-                        self.logger.info(f"Remaining scheduled task: {str(scheduled_task[1])} due in {(scheduled_task[0] - current_time) if scheduled_task else 'None'} seconds")
+                        self.logger.debug(f"Remaining scheduled task: {str(scheduled_task[1])} due in {(scheduled_task[0] - current_time) if scheduled_task else 'None'} seconds")
             except Exception as e:
-                self.logger.error(f"Error processing due tasks: {e}", exc_info=True)
+                self.logger.error(f"Error processing due tasks: {e}")
 
             # Process commands from the queue
-            self.logger.info(f"Processing commands from the queue which has {self.command_queue.qsize()} items")
+            self.logger.debug(f"Processing commands from the queue which has {self.command_queue.qsize()} items")
             try:
                 command = await asyncio.wait_for(self.command_queue.get(), timeout=1.0)
-                self.logger.info(f"Processing command: {command}")
+                self.logger.debug(f"Processing command: {command}")
                 await command.execute(self)
                 self.command_queue.task_done()
             except asyncio.TimeoutError:
-                self.logger.info(f"No commands in the queue at {time.time()}")
+                self.logger.debug(f"No commands in the queue at {time.time()}")
                 await asyncio.sleep(0.1)
 
             try:
                 # Check for disconnections and data inactivity
                 await self.check_client_manager_status()
             except Exception as e:
-                self.logger.error(f"Error checking client manager status: {e}", exc_info=True)
+                self.logger.error(f"Error checking client manager status: {e}")
 
     async def check_client_manager_status(self):
         current_time = time.time()
-        self.logger.info(f"Checking client manager status at {current_time}")
+        self.logger.debug(f"Checking client manager status at {current_time} have {len(self.client_managers)} client managers")
         device_statuses = []
 
         # Group client managers by address
@@ -158,17 +160,18 @@ class BLEManager:
 
             client_manager = managers[0]
             client = client_manager.client
-            self.logger.info(f"Client manager {client_manager} exists for {get_device_name(address)}")
+            logger = get_device_logger(address)
+            logger.debug(f"Client manager {client_manager} exists for {get_device_name(address)}")
             time_since_last_data = current_time - self.last_data_received.get(address, 0)
-            self.logger.info(f"Checking device status for {get_device_name(address)} client_manager_id={client_manager.client_id}: connected={client.is_connected} last_data_received={self.last_data_received.get(address, 0)} current_time={current_time} time_since_last_data={time_since_last_data}")
+            logger.debug(f"Checking device status for {get_device_name(address)} client_manager_id={client_manager.client_id}: connected={client.is_connected} last_data_received={self.last_data_received.get(address, 0)} current_time={current_time} time_since_last_data={time_since_last_data}")
 
             event_id = None
             reason = None
 
             if not client.is_connected:
-                status = f"{get_device_name(address)}: Disconnected"
+                status = f"{get_device_name(address)}: Is no longer connected"
                 event_id = self.generate_event_id(address)
-                reason = "Device disconnected on us at " + time.strftime("%H:%M:%S", time.localtime())
+                reason = "Device is no longer connected at " + time.strftime("%H:%M:%S", time.localtime())
             elif time_since_last_data > self.data_inactivity_timeout:
                 status = f"{get_device_name(address)}: Connected but last data too old as {time_since_last_data:.1f}s ago"
                 event_id = self.generate_event_id(address)
@@ -182,14 +185,15 @@ class BLEManager:
             device_statuses.append(status)
 
         summary = " | ".join(device_statuses)
-        self.logger.info(f"Device status summary: {summary}")
+        self.logger.debug(f"Device status summary: {summary}")
 
-    async def disconnect_and_cleanup_and_queue_reconnect(self, client_manager, address, event_id, reason: str = None):
-        self.logger.warning(f"[{event_id}] reconnecting {get_device_name(address)} because {reason}")
+    async def disconnect_and_cleanup_and_queue_reconnect(self, client_manager, address, event_id, reason: str = None, delete_client_manager: bool = True):
+        logger = get_device_logger(address)
+        logger.warning(f"[{event_id}] reconnecting {get_device_name(address)} because {reason}")
         try:
-            await self.disconnect_and_cleanup_client_manager(client_manager, event_id, reason)
+            await self.disconnect_and_cleanup_client_manager(client_manager, event_id, reason, delete_client_manager)
         except Exception as e:
-            self.logger.error(f"[{event_id}] Error disconnecting client manager for {get_device_name(address)}: {e}", exc_info=True)
+            logger.error(f"[{event_id}] Error disconnecting client manager for {get_device_name(address)}: {e}")
             # But continue with the reconnect attempt
         await self.queue_connect(address, event_id, reason)
 
@@ -212,57 +216,69 @@ class BLEManager:
             client_manager = ViatomClientManager(client, self.data_queue, self, client_id, address)
         elif address == os.getenv('POLAR_DEVICE_ADDRESS'):
             client_manager = PolarClientManager(client, self.data_queue, client_id, address)
+        elif address == os.getenv('MOVESENSE_DEVICE_ADDRESS'):
+            client_manager = MovesenseClientManager(client, self.data_queue, self, client_id, address)
         else:
             self.logger.warning(f"Still unknown device type: {address}")
         
         return client_manager
 
     async def handle_post_connection(self, client: BleakClient, address: str):
-        self.logger.info(f"Handling post connection for device {address}")
+        logger = get_device_logger(address)
+        logger.info(f"Handling post connection for device {address}")
         self.update_last_data_received(address)
         device_name = get_device_name(address)
         
         client_manager = await self.create_client_manager(client, address)
         if client_manager is None:
-            self.logger.error(f"Failed to create client manager for device {device_name}")
+            logger.error(f"Failed to create client manager for device {device_name}")
             return
         
-        self.logger.info(f"[{client_manager.client_id}] Connected to device {device_name}")   
+        logger.info(f"[{client_manager.client_id}] Connected to device {device_name}")   
         
         try:
             await client_manager.subscribe()
-            self.logger.info(f"[{client_manager.client_id}] Successfully subscribed to device {device_name}")
+            logger.info(f"[cm={client_manager.client_id}] Successfully subscribed to device {device_name}")
             self.client_managers.append(client_manager) 
         except Exception as e:
             event_id = self.generate_event_id(address)
-            self.logger.error(f"[{event_id}] Failed to subscribe to device {device_name}: {e}", exc_info=True)
-            await self.disconnect_and_cleanup_and_queue_reconnect(client_manager, address, event_id, "Failed to subscribe")
+            logger.error(f"[event={event_id}] Failed to subscribe to device {device_name}: {e}")
+            await self.disconnect_and_cleanup_and_queue_reconnect(client_manager, address, event_id, "Failed to subscribe", delete_client_manager=False)
+            del client_manager
     
     def update_last_data_received(self, address):
-        self.logger.info(f"Updating last data received for {get_device_name(address)}")
+        logger = get_device_logger(address)
+        logger.debug(f"Updating last data received for {get_device_name(address)}")
         self.last_data_received[address] = time.time()
 
 
     async def queue_connect_to_specific_device(self, address, event_id, reason: str = None):
-        self.logger.info(f"Attempting to connect to device at {address}")
+        logger = get_device_logger(address)
+        logger.info(f"Attempting to connect to device at {address}")
         await self.command_queue.put(ConnectCommand(address, event_id, reason))
 
-    async def disconnect_and_cleanup_client_manager(self, client_manager, event_id, reason: str = None):
+    async def disconnect_and_cleanup_client_manager(self, client_manager, event_id, reason: str = None, delete_client_manager: bool = True):
         address = client_manager.address
-        self.logger.info(f"Cleaning up client manager {client_manager.client_id} for address {get_device_name(client_manager.address)}")
+        logger = get_device_logger(address)
+        logger.debug(f"Cleaning up client manager {client_manager.client_id} for address {get_device_name(client_manager.address)}")
         client: BleakClient = client_manager.client
-        self.logger.info(f"Disconnecting from device {address} because {reason}")
+        logger.info(f"Disconnecting from device {address} because {reason}")
         try:
             await client.disconnect()
         except Exception as e:
-            self.logger.error(f"Error disconnecting client {get_device_name(address)}: {e}", exc_info=True)
+            logger.error(f"Error disconnecting client {get_device_name(address)}: {e}")
+
         try:
-            self.logger.info(f"Cleaning up client manager {get_device_name(address)}")
+            logger.debug(f"Cleaning up client manager {get_device_name(address)}")
             await client_manager.cleanup()
         except Exception as e:
-            self.logger.error(f"Error cleaning up client manager {get_device_name(address)}: {e}", exc_info=True)
+            logger.error(f"Error cleaning up client manager {get_device_name(address)}: {e}")
         finally:
-            self.client_managers.remove(client_manager)
+            if delete_client_manager:
+                if client_manager in self.client_managers:
+                    self.client_managers.remove(client_manager)
+                else:
+                    logger.warning(f"Client manager {client_manager.client_id} for address {get_device_name(address)} not found in client_managers list")
 
     async def schedule_command(self, command, delay):
         execution_time = asyncio.get_event_loop().time() + delay
@@ -276,3 +292,9 @@ class BLEManager:
         while not self.data_received_queue.empty():
             address = await self.data_received_queue.get()
             self.update_last_data_received(address)
+
+    async def disconnect_all_devices(self):
+        self.logger.info(f"Disconnecting all {len(self.client_managers)} devices")
+        for client_manager in self.client_managers:
+            event_id = self.generate_event_id(client_manager.address)
+            await self.disconnect_and_cleanup_client_manager(client_manager, event_id, "Shutting down")

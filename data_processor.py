@@ -7,7 +7,7 @@ from ble_command import SharedData
 from core_device import CoreTempData
 from polar_device import PolarAccData, PolarHRData
 from viatom_device import ViatomData
-
+from movesense_device import MovesenseHRData, MovesenseAccelData
 class DataProcessor:
     def __init__(self, data_queue: Queue[SharedData], influx_manager, mqtt_manager, ble_manager):
         self.data_queue = data_queue
@@ -30,7 +30,7 @@ class DataProcessor:
         while True:
             try:
                 data: SharedData = self.data_queue.get()
-                self.logger.info(f"Processing data: {data} num_dropped_influx: {self.dropped_influx} num_dropped_mqtt: {self.dropped_mqtt} influx_queue_size: {self.influx_queue.qsize()} mqtt_queue_size: {self.mqtt_queue.qsize()}")
+                self.logger.debug(f"Processing data: {data} num_dropped_influx: {self.dropped_influx} num_dropped_mqtt: {self.dropped_mqtt} influx_queue_size: {self.influx_queue.qsize()} mqtt_queue_size: {self.mqtt_queue.qsize()}")
 
                 self.ble_manager.update_last_data_received(data.device_address)
 
@@ -46,6 +46,12 @@ class DataProcessor:
                 elif isinstance(data, PolarAccData):
                     self.process_polar_acc_for_influx(data)
                     self.process_polar_acc_for_mqtt(data)
+                elif isinstance(data, MovesenseHRData): 
+                    #self.process_movesense_hr_for_influx(data)
+                    self.process_movesense_hr_for_mqtt(data)
+                elif isinstance(data, MovesenseAccelData):
+                    #self.process_movesense_accel_for_influx(data)
+                    self.process_movesense_accel_for_mqtt(data)
                 else:
                     self.logger.warning(f"Unknown data type: {data}")
             except Exception as e:
@@ -165,6 +171,33 @@ class DataProcessor:
         }
         self.add_to_mqtt_queue(mqtt_message)
 
+    def process_movesense_hr_for_influx(self, movesense_data: MovesenseHRData):
+        influx_data = {
+            "measurement": "android_hr",
+            "tags": {
+                "model": "Minix",
+                "source": "Movesense"
+            },
+            "fields": {
+                "hr": movesense_data.hr,
+                "rrIntervals": ','.join(map(str, movesense_data.rr_intervals)),
+            },
+            "time": movesense_data.timestamp
+        }
+        self.add_to_influx_queue(influx_data)
+
+    def process_movesense_hr_for_mqtt(self, movesense_data: MovesenseHRData):
+        mqtt_data = {
+            "hr": int(movesense_data.hr),
+            "rrIntervals": ','.join(map(str, movesense_data.rr_intervals)),
+        }
+        
+        mqtt_message = {
+            "topic": "xl/polar/hr",
+            "payload": mqtt_data
+        }
+        self.add_to_mqtt_queue(mqtt_message)
+
     def process_polar_acc_for_influx(self, polar_data: PolarAccData):
         influx_data = {
             "measurement": "android_accel",
@@ -188,6 +221,35 @@ class DataProcessor:
             "y": int(polar_data.y),
             "z": int(polar_data.z),
             "position": polar_data.position.value
+        }
+        
+        mqtt_message = {
+            "topic": "xl/polar/accelerometer",
+            "payload": mqtt_data
+        }
+        self.add_to_mqtt_queue(mqtt_message)
+
+    def process_movesense_accel_for_influx(self, movesense_data: MovesenseAccelData):
+        influx_data = {
+            "measurement": "android_accel",
+            "tags": {
+                "model": "Minix",
+                "source": "Movesense"
+            },
+            "fields": {
+                "x": movesense_data.x,
+                "y": movesense_data.y,
+                "z": movesense_data.z,
+            },
+            "time": movesense_data.timestamp
+        }
+        self.add_to_influx_queue(influx_data)
+
+    def process_movesense_accel_for_mqtt(self, movesense_data: MovesenseAccelData):
+        mqtt_data = {
+            "x": int(movesense_data.x),
+            "y": int(movesense_data.y),
+            "z": int(movesense_data.z),
         }
         
         mqtt_message = {
