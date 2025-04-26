@@ -64,14 +64,30 @@ class IgnoreBrokenPipeHandler(logging.StreamHandler):
         except BrokenPipeError:
             pass
 
+class ColoredConsoleFormatter(logging.Formatter):
+    def format(self, record):
+        if record.levelno == logging.WARNING:
+            return f'\033[93m{super().format(record)}\033[0m'
+        elif record.levelno == logging.ERROR:
+            return f'\033[91m{super().format(record)}\033[0m'
+        return super().format(record)
+
+class WebLogFormatter(logging.Formatter):
+    def format(self, record):
+        if record.levelno == logging.WARNING:
+            return f'<span style="color: yellow;">{super().format(record)}</span>'
+        elif record.levelno == logging.ERROR:
+            return f'<span style="color: red;">{super().format(record)}</span>'
+        return super().format(record)
+
 stdout_handler = IgnoreBrokenPipeHandler(sys.stdout)
 stdout_handler.setLevel(logging.DEBUG)
-stdout_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)-20s - %(levelname)-8s - %(message)s'))
+stdout_handler.setFormatter(ColoredConsoleFormatter('%(asctime)s - %(name)-20s - %(levelname)-8s - %(message)s'))
 
 # Add memory log handler
 memory_handler = MemoryLogHandler()
 memory_handler.setLevel(logging.DEBUG)
-memory_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)-20s - %(levelname)-8s - %(message)s'))
+memory_handler.setFormatter(WebLogFormatter('%(asctime)s - %(name)-20s - %(levelname)-8s - %(message)s'))
 
 # Configure the root logger
 logging.basicConfig(

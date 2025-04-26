@@ -36,11 +36,12 @@ class CoreClientManager:
 
     def __del__(self):
         self.logger.info(f"CoreClientManager {self.client_id} being deleted")
-        self.cleanup()
+        asyncio.create_task(self.cleanup())
 
-    async def cleanup(self):
+    def cleanup(self):
         self.logger.info(f"CoreClientManager {self.client_id} being cleaned up")
-        pass
+        self.dead = True
+        self.client.disconnect()
 
     async def core_temperature_measurement_handler(self, sender, data):
         if self.dead:

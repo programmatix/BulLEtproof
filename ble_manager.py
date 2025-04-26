@@ -71,7 +71,6 @@ class ConnectCommand(BLECommand):
         # Schedule next connection attempt
         next_attempt = self.attempt + 1
         wait_time = min(60, 2 ** next_attempt)
-        self.logger.info(f"Scheduling next connection attempt to {device_name} in {wait_time} seconds")
         
         # Check if there's already a ConnectCommand for this address
         existing_connect_commands = [task for task in manager.scheduled_tasks 
