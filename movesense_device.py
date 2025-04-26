@@ -22,6 +22,11 @@ class MovesenseAccelData(SharedData):
     x: float
     y: float
     z: float
+    sensor_timestamp: int
+
+@dataclass
+class MovesenseBatteryData(SharedData):
+    level: float
 
 class MovesenseConstants:
     WRITE_UUID = "34800001-7185-4d5d-b431-630e7050e8f0"
@@ -31,6 +36,7 @@ class MovesenseConstants:
     PACKET_TYPE_COMMAND_RESPONSE = 1
     REF_HR = 102
     REF_ACCEL = 101
+    REF_BATTERY = 103
 
 class DataView:
     def __init__(self, array, bytes_per_element=1):
@@ -104,27 +110,26 @@ class MovesenseClientManager:
         reference = d.get_uint_8(1)
 
         ref = "accel" if reference == MovesenseConstants.REF_ACCEL else "hr"
-        # self.logger.info(f"Packet type: {packet_type}, Reference: {reference} ({ref}), Data: {data.hex()}")
+        ref = "battery" if reference == MovesenseConstants.REF_BATTERY else ref
 
-        if packet_type == MovesenseConstants.PACKET_TYPE_DATA and reference == MovesenseConstants.REF_ACCEL:  # Accel data
-            timestamp = d.get_uint_32(2)  # 4 bytes for timestamp
-            # for i in range(0, 8):
-            row_timestamp = timestamp# + int(i * 1000 / 13)
+        if packet_type == MovesenseConstants.PACKET_TYPE_DATA and reference == MovesenseConstants.REF_ACCEL:
+            timestamp = d.get_uint_32(2)
             offset = 6 + 0 * 3 * 4
-            acc_x = d.get_float_32(offset)      # 2 bytes for x
-            acc_y = d.get_float_32(offset + 4)      # 2 bytes for y
-            acc_z = d.get_float_32(offset + 8)     # 2 bytes for z
+            acc_x = d.get_float_32(offset)
+            acc_y = d.get_float_32(offset + 4)
+            acc_z = d.get_float_32(offset + 8)
             bytes_remaining = len(data) - offset - 12
-            self.logger.debug(f"Accel Data: Timestamp={row_timestamp}, X={acc_x}, Y={acc_y}, Z={acc_z}, Bytes remaining: {bytes_remaining}")
+            self.logger.debug(f"Accel Data: Timestamp={timestamp}, X={acc_x}, Y={acc_y}, Z={acc_z}, Bytes remaining: {bytes_remaining}")
             self.data_queue.put(MovesenseAccelData(
                 x=float(acc_x),
                 y=float(acc_y),
                 z=float(acc_z),
-                timestamp=row_timestamp,
+                sensor_timestamp=timestamp,
+                timestamp=int(time.time() * 1e9),
                 device_address=self.address
             ))
-        elif packet_type == MovesenseConstants.PACKET_TYPE_DATA and reference == MovesenseConstants.REF_HR:  # HR data
-            buffer_len = len(data) - 2  # Subtract packet type and reference bytes
+        elif packet_type == MovesenseConstants.PACKET_TYPE_DATA and reference == MovesenseConstants.REF_HR:
+            buffer_len = len(data) - 2
             buffer = data[2:]
             
             hr_data = MovesenseHRData(
@@ -134,12 +139,10 @@ class MovesenseClientManager:
                 device_address=self.address
             )
             
-            # First comes the float average (4 bytes) - get HR value from this float
             if len(buffer) >= 4:
-                hr_data.hr = d.get_float_32(2)  # Offset 2 in original data (after packet_type and reference)
-                pos = 6  # Start position for RR data (2 + 4)
+                hr_data.hr = d.get_float_32(2)
+                pos = 6
                 
-                # Then comes the array of uint16 RR intervals
                 while pos + 1 < len(data):
                     rr_interval = d.get_uint_16(pos)
                     pos += 2
@@ -148,11 +151,19 @@ class MovesenseClientManager:
             
             self.logger.debug(f"HR Data: HR={hr_data.hr} BPM, RR={hr_data.rr_intervals if hr_data.rr_intervals else 'none'} ms")
             self.data_queue.put(hr_data)
-        elif packet_type == MovesenseConstants.PACKET_TYPE_COMMAND_RESPONSE:  # COMMAND_RESPONSE
+        elif packet_type == MovesenseConstants.PACKET_TYPE_DATA and reference == MovesenseConstants.REF_BATTERY:
+            battery_level = d.get_float_32(2)
+            self.logger.debug(f"Battery Data: Level={battery_level}%")
+            self.data_queue.put(MovesenseBatteryData(
+                level=float(battery_level),
+                timestamp=int(time.time() * 1e9),
+                device_address=self.address
+            ))
+        elif packet_type == MovesenseConstants.PACKET_TYPE_COMMAND_RESPONSE:
             status_code = d.get_uint_16(2)
             self.logger.info(f"Command Response: Reference={reference} ({ref}), Status={status_code}")
         else:
-            self.logger.info(f"Received unknown data from Movesense device: {data.hex()}")  
+            self.logger.info(f"Received unknown data from Movesense device: {data.hex()}")
 
     async def subscribe(self):
         try:

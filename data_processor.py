@@ -7,7 +7,7 @@ from ble_command import SharedData
 from core_device import CoreTempData
 from polar_device import PolarAccData, PolarHRData
 from viatom_device import ViatomData
-from movesense_device import MovesenseHRData, MovesenseAccelData
+from movesense_device import MovesenseBatteryData, MovesenseHRData, MovesenseAccelData
 class DataProcessor:
     def __init__(self, data_queue: Queue[SharedData], influx_manager, mqtt_manager, ble_manager):
         self.data_queue = data_queue
@@ -52,6 +52,8 @@ class DataProcessor:
                 elif isinstance(data, MovesenseAccelData):
                     self.process_movesense_accel_for_influx(data)
                     self.process_movesense_accel_for_mqtt(data)
+                elif isinstance(data, MovesenseBatteryData):
+                    self.process_movesense_battery_for_mqtt(data)
                 else:
                     self.logger.warning(f"Unknown data type: {data}")
             except Exception as e:
@@ -240,6 +242,7 @@ class DataProcessor:
                 "x": movesense_data.x,
                 "y": movesense_data.y,
                 "z": movesense_data.z,
+                "ts": float(movesense_data.sensor_timestamp)
             },
             "time": movesense_data.timestamp
         }
@@ -256,6 +259,16 @@ class DataProcessor:
             "topic": "xl/polar/accelerometer",
             "payload": mqtt_data
         }
+        self.add_to_mqtt_queue(mqtt_message)
+
+    def process_movesense_battery_for_mqtt(self, movesense_data: MovesenseBatteryData):
+        mqtt_data = {
+            "level": int(movesense_data.level),
+        }
+        mqtt_message = {
+            "topic": "xl/polar/battery",
+            "payload": mqtt_data
+        }   
         self.add_to_mqtt_queue(mqtt_message)
 
     def handle_influx_queue(self):
