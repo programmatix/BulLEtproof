@@ -24,6 +24,15 @@ class InfluxManager:
             self.logger.error(f"Error writing to InfluxDB: {e}", exc_info=True)
             self.logger.info(f"Failed data point: {data}")
             
+    def write_batch(self, data_points):
+        self.logger.debug(f"Writing batch of {len(data_points)} points to InfluxDB")
+        try:
+            self.client.write_points(data_points)
+            self.logger.debug(f"Successfully wrote batch of {len(data_points)} points to InfluxDB")
+        except Exception as e:
+            self.logger.error(f"Error writing batch to InfluxDB: {e}", exc_info=True)
+            self.logger.info(f"Failed batch size: {len(data_points)}")
+            
     def close(self):
         self.client.close()
         self.logger.info("InfluxDB connection closed")

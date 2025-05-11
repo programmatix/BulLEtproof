@@ -5,6 +5,9 @@ from dataclasses import dataclass
 import struct
 import time
 from ble_command import SharedData
+import math
+from collections import deque
+from datetime import datetime, timedelta
 
 from bleak import BleakClient
 
@@ -16,6 +19,7 @@ from ble_logging import get_device_logger
 class MovesenseHRData(SharedData):
     hr: float
     rr_intervals: list[int]
+    hrv: int = -1
 
 @dataclass
 class MovesenseAccelData(SharedData):
@@ -81,6 +85,7 @@ class MovesenseClientManager:
         self.dead = False
         self.address = address
         self.logger.info(f"MovesenseClientManager initialized with client_id: {client_id}")
+        self.rr_history = deque(maxlen=300)  # Store up to 300 RR intervals with timestamps
 
     def __str__(self):
         return f"MovesenseClientManager(client_id={self.client_id}, address={get_device_name(self.address)})"
@@ -95,6 +100,26 @@ class MovesenseClientManager:
             self.logger.info(f"MovesenseClientManager {self.client_id} being deleted")
         if not self.dead:
             asyncio.create_task(self.cleanup())
+
+    def calculate_hrv(self):
+        try:
+            one_minute_ago = datetime.now() - timedelta(minutes=1)
+            recent_rr_intervals = [rr for timestamp, rr in self.rr_history 
+                                if timestamp > one_minute_ago and 500 <= rr <= 1500]
+            
+            if len(recent_rr_intervals) >= 2:
+                sum_squared_diffs = 0.0
+                for i in range(len(recent_rr_intervals) - 1):
+                    diff = recent_rr_intervals[i + 1] - recent_rr_intervals[i]
+                    sum_squared_diffs += diff * diff
+                
+                hrv = int(math.sqrt(sum_squared_diffs / (len(recent_rr_intervals) - 1)))
+                return hrv
+            else:
+                return -1
+        except Exception as e:
+            self.logger.error(f"Error calculating HRV: {e}")
+            return -1
 
     async def data_handler(self, sender, data):
         if self.dead:
@@ -135,6 +160,7 @@ class MovesenseClientManager:
             hr_data = MovesenseHRData(
                 hr=0.0,
                 rr_intervals=[],
+                hrv=-1,
                 timestamp=int(time.time() * 1e9),
                 device_address=self.address
             )
@@ -147,9 +173,16 @@ class MovesenseClientManager:
                     rr_interval = d.get_uint_16(pos)
                     pos += 2
                     
-                    hr_data.rr_intervals.append(float(rr_interval))
+                    hr_data.rr_intervals.append(rr_interval)
+                    
+                    # Store RR intervals with current timestamp for HRV calculation
+                    if 500 <= rr_interval <= 1500:
+                        self.rr_history.append((datetime.now(), rr_interval))
+                
+                # Calculate HRV based on stored RR intervals
+                hr_data.hrv = self.calculate_hrv()
             
-            self.logger.debug(f"HR Data: HR={hr_data.hr} BPM, RR={hr_data.rr_intervals if hr_data.rr_intervals else 'none'} ms")
+            self.logger.debug(f"HR Data: HR={hr_data.hr} BPM, RR={hr_data.rr_intervals if hr_data.rr_intervals else 'none'} ms, HRV={hr_data.hrv}")
             self.data_queue.put(hr_data)
         elif packet_type == MovesenseConstants.PACKET_TYPE_DATA and reference == MovesenseConstants.REF_BATTERY:
             battery_level = d.get_float_32(2)

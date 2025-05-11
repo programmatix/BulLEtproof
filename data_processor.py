@@ -1,24 +1,99 @@
 import logging
-from queue import Full, Queue
-from threading import Thread
+from queue import Full, Queue, Empty
+from threading import Thread, Lock, Event
 import json
+import time
+from typing import List, Dict, Any, TypeVar, Generic, Deque
+from collections import deque
 
 from ble_command import SharedData
 from core_device import CoreTempData
 from polar_device import PolarAccData, PolarHRData
 from viatom_device import ViatomData
 from movesense_device import MovesenseBatteryData, MovesenseHRData, MovesenseAccelData
+
+T = TypeVar('T')
+
+class BoundedQueue(Generic[T]):
+    """A queue with a maximum size that drops oldest items when full."""
+    
+    def __init__(self, maxsize: int = 100_000):
+        self.queue: Deque[T] = deque(maxlen=maxsize)
+        self.maxsize = maxsize
+        self.lock = Lock()
+        self.not_empty = Event()
+    
+    def put(self, item: T, block: bool = True, timeout: float = None) -> bool:
+        """Add an item to the queue, dropping oldest if full."""
+        with self.lock:
+            self.queue.append(item)
+            self.not_empty.set()
+            return True
+    
+    def get(self, block: bool = True, timeout: float = None) -> T:
+        """Remove and return an item from the queue."""
+        if block and timeout is None:
+            while True:
+                with self.lock:
+                    if len(self.queue):
+                        return self.queue.popleft()
+                self.not_empty.wait(timeout=0.1)  # Wait with timeout to allow keyboard interrupt
+        else:
+            end_time = None if timeout is None else time.time() + timeout
+            
+            while True:
+                with self.lock:
+                    if len(self.queue):
+                        return self.queue.popleft()
+                
+                if timeout is not None:
+                    remaining = end_time - time.time()
+                    if remaining <= 0:
+                        raise Empty("Queue is empty")
+                    wait_time = min(remaining, 0.1)  # Wait at most 0.1s at a time
+                else:
+                    wait_time = 0.1
+                
+                if not block:
+                    with self.lock:
+                        if len(self.queue):
+                            return self.queue.popleft()
+                    raise Empty("Queue is empty")
+                
+                self.not_empty.wait(timeout=wait_time)
+    
+    def qsize(self) -> int:
+        """Return the approximate size of the queue."""
+        with self.lock:
+            return len(self.queue)
+    
+    def empty(self) -> bool:
+        """Return True if the queue is empty, False otherwise."""
+        with self.lock:
+            return len(self.queue) == 0
+    
+    def full(self) -> bool:
+        """Return True if the queue is full, False otherwise."""
+        # This queue is never full in the traditional sense
+        # It automatically drops oldest items
+        return False
+    
 class DataProcessor:
     def __init__(self, data_queue: Queue[SharedData], influx_manager, mqtt_manager, ble_manager):
         self.data_queue = data_queue
-        self.influx_queue = Queue(maxsize=100_000)
-        self.mqtt_queue = Queue(maxsize=100)
+        self.influx_queue = BoundedQueue[Dict](maxsize=100_000)
+        self.mqtt_queue = BoundedQueue[Dict](maxsize=100_000)
         self.influx_manager = influx_manager
         self.mqtt_manager = mqtt_manager
         self.ble_manager = ble_manager
         self.logger = logging.getLogger(__name__)
         self.dropped_influx = 0
         self.dropped_mqtt = 0
+        
+        # Batch settings
+        self.influx_batch_size = 100
+        self.mqtt_batch_size = 20
+        self.max_batch_wait_time = 1.0  # seconds
 
     def start(self):
         Thread(target=self.process_data, daemon=True).start()
@@ -61,14 +136,18 @@ class DataProcessor:
 
     def add_to_influx_queue(self, influx_data: dict):
         try:
+            # With BoundedQueue, this will always succeed but may drop oldest items
             self.influx_queue.put(influx_data, block=False)
-        except Full as e:
+        except Exception as e:
+            self.logger.error(f"Unexpected error adding to influx queue: {e}", exc_info=True)
             self.dropped_influx += 1
 
     def add_to_mqtt_queue(self, mqtt_data: dict):
         try:
+            # With BoundedQueue, this will always succeed but may drop oldest items
             self.mqtt_queue.put(mqtt_data, block=False)
-        except Full as e:
+        except Exception as e:
+            self.logger.error(f"Unexpected error adding to mqtt queue: {e}", exc_info=True)
             self.dropped_mqtt += 1
 
     def process_core_for_influx(self, core_temp_data: CoreTempData):
@@ -186,6 +265,11 @@ class DataProcessor:
             },
             "time": movesense_data.timestamp
         }
+        
+        # Include HRV in the existing fields if it's valid (not -1)
+        if movesense_data.hrv != -1:
+            influx_data["fields"]["hrv"] = movesense_data.hrv
+            
         self.add_to_influx_queue(influx_data)
 
     def process_movesense_hr_for_mqtt(self, movesense_data: MovesenseHRData):
@@ -193,6 +277,10 @@ class DataProcessor:
             "hr": int(movesense_data.hr),
             "rrIntervals": ','.join(map(str, movesense_data.rr_intervals)),
         }
+        
+        # Include HRV in MQTT data if it's valid
+        if movesense_data.hrv != -1:
+            mqtt_data["hrv"] = movesense_data.hrv
         
         mqtt_message = {
             "topic": "xl/polar/hr",
@@ -274,15 +362,55 @@ class DataProcessor:
     def handle_influx_queue(self):
         while True:
             try:
-                influx_data = self.influx_queue.get()
-                self.influx_manager.write_data(influx_data)
+                batch: List[Dict[str, Any]] = []
+                last_time = time.time()
+                
+                # Get first item (blocking)
+                batch.append(self.influx_queue.get())
+                
+                # Try to get more items up to batch size or timeout
+                while len(batch) < self.influx_batch_size and (time.time() - last_time) < self.max_batch_wait_time:
+                    try:
+                        # Non-blocking get with timeout
+                        item = self.influx_queue.get(block=True, timeout=self.max_batch_wait_time - (time.time() - last_time))
+                        batch.append(item)
+                    except Empty:
+                        # Timeout reached, process what we have
+                        break
+                
+                # Write batch to InfluxDB
+                if batch:
+                    self.logger.debug(f"Writing {len(batch)} items to InfluxDB")
+                    self.influx_manager.write_batch(batch)
             except Exception as e:
-                self.logger.error(f"Error writing to InfluxDB: {e}")
+                self.logger.error(f"Error writing batch to InfluxDB: {e}", exc_info=True)
 
     def handle_mqtt_queue(self):
         while True:
             try:
-                mqtt_message = self.mqtt_queue.get()
-                self.mqtt_manager.publish_data(mqtt_message['topic'], mqtt_message['payload'])
+                batch = {}  # Dictionary to store latest message per topic
+                last_time = time.time()
+                
+                # Get first item (blocking)
+                first_message = self.mqtt_queue.get()
+                topic = first_message['topic']
+                batch[topic] = first_message['payload']
+                
+                # Try to get more items up to batch size or timeout
+                while len(batch) < self.mqtt_batch_size and (time.time() - last_time) < self.max_batch_wait_time:
+                    try:
+                        # Non-blocking get with timeout
+                        item = self.mqtt_queue.get(block=True, timeout=self.max_batch_wait_time - (time.time() - last_time))
+                        topic = item['topic']
+                        # Keep only the latest message for each topic
+                        batch[topic] = item['payload']
+                    except Empty:
+                        # Timeout reached, process what we have
+                        break
+                
+                # Publish latest message for each topic
+                for topic, payload in batch.items():
+                    self.mqtt_manager.publish_data(topic, payload)
+                    self.logger.debug(f"Published latest data to {topic}")
             except Exception as e:
-                self.logger.error(f"Error publishing to MQTT: {e}")
+                self.logger.error(f"Error publishing to MQTT: {e}", exc_info=True)
