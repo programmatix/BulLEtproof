@@ -19,7 +19,7 @@ from ble_logging import get_device_logger
 class MovesenseHRData(SharedData):
     hr: float
     rr_intervals: list[int]
-    hrv: int = -1
+    hrv: float = -1
 
 @dataclass
 class MovesenseAccelData(SharedData):
@@ -113,7 +113,7 @@ class MovesenseClientManager:
                     diff = recent_rr_intervals[i + 1] - recent_rr_intervals[i]
                     sum_squared_diffs += diff * diff
                 
-                hrv = int(math.sqrt(sum_squared_diffs / (len(recent_rr_intervals) - 1)))
+                hrv = math.sqrt(sum_squared_diffs / (len(recent_rr_intervals) - 1))
                 return hrv
             else:
                 return -1
