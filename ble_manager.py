@@ -106,6 +106,17 @@ class BLEManager:
         logger = logging.getLogger("ble_queue")
         try:
             while True:
+                # Check if BLE manager is active
+                try:
+                    from main import component_status
+                    if not component_status.get("ble_manager_active", True):
+                        logger.debug("BLE manager is disabled, sleeping")
+                        await asyncio.sleep(1)
+                        continue
+                except ImportError:
+                    # If we can't import component_status, assume it's active
+                    pass
+                
                 # Process any due scheduled tasks
                 try:
                     current_time = asyncio.get_event_loop().time()
@@ -132,6 +143,8 @@ class BLEManager:
                 except asyncio.TimeoutError:
                     logger.debug(f"No commands in the queue at {time.time()}")
                     await asyncio.sleep(0.1)
+                except Exception as e:
+                    logger.error(f"Error processing command: {e}")
 
                 try:
                     # Check for disconnections and data inactivity
@@ -349,3 +362,22 @@ class BLEManager:
             if client_manager.address == device_address:
                 return client_manager
         return None
+        
+    def get_status(self):
+        """
+        Get the current status of the BLE manager including command queue size,
+        number of client managers, and scheduled tasks.
+        """
+        return {
+            "command_queue_size": self.command_queue.qsize(),
+            "client_managers_count": len(self.client_managers),
+            "scheduled_tasks_count": len(self.scheduled_tasks),
+            "connected_devices": [
+                {
+                    "address": cm.address, 
+                    "status": cm.status,
+                    "last_data": self.last_data_received.get(cm.address, 0)
+                } 
+                for cm in self.client_managers
+            ]
+        }

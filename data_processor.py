@@ -22,55 +22,62 @@ class BoundedQueue(Generic[T]):
         self.maxsize = maxsize
         self.lock = Lock()
         self.not_empty = Event()
+        self._size = 0  # Track size to avoid frequent lock acquisition
     
     def put(self, item: T, block: bool = True, timeout: float = None) -> bool:
         """Add an item to the queue, dropping oldest if full."""
         with self.lock:
             self.queue.append(item)
+            self._size = len(self.queue)  # Update size under lock
             self.not_empty.set()
             return True
     
     def get(self, block: bool = True, timeout: float = None) -> T:
         """Remove and return an item from the queue."""
+        if not block:
+            with self.lock:
+                if self._size:
+                    item = self.queue.popleft()
+                    self._size = len(self.queue)
+                    return item
+                raise Empty("Queue is empty")
+        
         if block and timeout is None:
             while True:
                 with self.lock:
-                    if len(self.queue):
-                        return self.queue.popleft()
-                self.not_empty.wait(timeout=0.1)  # Wait with timeout to allow keyboard interrupt
+                    if self._size:
+                        item = self.queue.popleft()
+                        self._size = len(self.queue)
+                        return item
+                # Use a shorter timeout to reduce CPU usage
+                self.not_empty.wait(timeout=0.5)  # Wait longer to reduce thread synchronization
         else:
             end_time = None if timeout is None else time.time() + timeout
             
             while True:
                 with self.lock:
-                    if len(self.queue):
-                        return self.queue.popleft()
+                    if self._size:
+                        item = self.queue.popleft()
+                        self._size = len(self.queue)
+                        return item
                 
                 if timeout is not None:
                     remaining = end_time - time.time()
                     if remaining <= 0:
                         raise Empty("Queue is empty")
-                    wait_time = min(remaining, 0.1)  # Wait at most 0.1s at a time
+                    wait_time = min(remaining, 0.5)  # Wait longer to reduce thread synchronization
                 else:
-                    wait_time = 0.1
-                
-                if not block:
-                    with self.lock:
-                        if len(self.queue):
-                            return self.queue.popleft()
-                    raise Empty("Queue is empty")
+                    wait_time = 0.5
                 
                 self.not_empty.wait(timeout=wait_time)
     
     def qsize(self) -> int:
         """Return the approximate size of the queue."""
-        with self.lock:
-            return len(self.queue)
+        return self._size  # Use cached size to avoid lock acquisition
     
     def empty(self) -> bool:
         """Return True if the queue is empty, False otherwise."""
-        with self.lock:
-            return len(self.queue) == 0
+        return self._size == 0  # Use cached size to avoid lock acquisition
     
     def full(self) -> bool:
         """Return True if the queue is full, False otherwise."""
@@ -105,6 +112,13 @@ class DataProcessor:
         while True:
             try:
                 data: SharedData = self.data_queue.get()
+                
+                # Check if data processing is enabled
+                from main import component_status
+                if not component_status.get("data_processor_active", True):
+                    self.logger.debug("Data processor is disabled, skipping processing")
+                    continue
+                
                 self.logger.debug(f"Processing data: {data} num_dropped_influx: {self.dropped_influx} num_dropped_mqtt: {self.dropped_mqtt} influx_queue_size: {self.influx_queue.qsize()} mqtt_queue_size: {self.mqtt_queue.qsize()}")
 
                 self.ble_manager.update_last_data_received(data.device_address)
@@ -268,7 +282,7 @@ class DataProcessor:
         
         # Include HRV in the existing fields if it's valid (not -1)
         if movesense_data.hrv != -1:
-            influx_data["fields"]["hrv"] = movesense_data.hrv
+            influx_data["fields"]["hrv_int"] = int(movesense_data.hrv)
             
         self.add_to_influx_queue(influx_data)
 
@@ -314,7 +328,7 @@ class DataProcessor:
         }
         
         mqtt_message = {
-            "topic": "xl/polar/accelerometer",
+            "topic": "xl/movesense/accelerometer",
             "payload": mqtt_data
         }
         self.add_to_mqtt_queue(mqtt_message)
@@ -344,7 +358,7 @@ class DataProcessor:
         }
         
         mqtt_message = {
-            "topic": "xl/polar/accelerometer",
+            "topic": "xl/movesense/accelerometer",
             "payload": mqtt_data
         }
         self.add_to_mqtt_queue(mqtt_message)
@@ -354,7 +368,7 @@ class DataProcessor:
             "level": int(movesense_data.level),
         }
         mqtt_message = {
-            "topic": "xl/polar/battery",
+            "topic": "xl/movesense/battery",
             "payload": mqtt_data
         }   
         self.add_to_mqtt_queue(mqtt_message)
@@ -362,6 +376,13 @@ class DataProcessor:
     def handle_influx_queue(self):
         while True:
             try:
+                # Check if influx manager is active
+                from main import component_status
+                if not component_status.get("influx_manager_active", True):
+                    self.logger.debug("InfluxDB manager is disabled, sleeping")
+                    time.sleep(1)
+                    continue
+                    
                 batch: List[Dict[str, Any]] = []
                 last_time = time.time()
                 
@@ -388,6 +409,13 @@ class DataProcessor:
     def handle_mqtt_queue(self):
         while True:
             try:
+                # Check if mqtt manager is active
+                from main import component_status
+                if not component_status.get("mqtt_manager_active", True):
+                    self.logger.debug("MQTT manager is disabled, sleeping")
+                    time.sleep(1)
+                    continue
+                    
                 batch = {}  # Dictionary to store latest message per topic
                 last_time = time.time()
                 
@@ -414,3 +442,18 @@ class DataProcessor:
                     self.logger.debug(f"Published latest data to {topic}")
             except Exception as e:
                 self.logger.error(f"Error publishing to MQTT: {e}", exc_info=True)
+                
+    def get_status(self):
+        """
+        Get the current status of the data processor including queue sizes and dropped messages.
+        """
+        return {
+            "data_queue_size": self.data_queue.qsize(),
+            "influx_queue_size": self.influx_queue.qsize(),
+            "mqtt_queue_size": self.mqtt_queue.qsize(),
+            "dropped_influx_messages": self.dropped_influx,
+            "dropped_mqtt_messages": self.dropped_mqtt,
+            "influx_batch_size": self.influx_batch_size,
+            "mqtt_batch_size": self.mqtt_batch_size,
+            "max_batch_wait_time": self.max_batch_wait_time
+        }
