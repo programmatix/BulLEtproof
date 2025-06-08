@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart Bluetooth Service
+After=bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart bluetooth

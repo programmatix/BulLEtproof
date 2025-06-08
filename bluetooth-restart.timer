@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Bluetooth Restart Timer
+Requires=bluetooth-restart.service
+
+[Timer]
+# Run daily at 12 PM (noon)
+OnCalendar=daily
+OnCalendar=12:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

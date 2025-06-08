@@ -282,7 +282,7 @@ class DataProcessor:
         
         # Include HRV in the existing fields if it's valid (not -1)
         if movesense_data.hrv != -1:
-            influx_data["fields"]["hrv_int"] = int(movesense_data.hrv)
+            influx_data["fields"]["hrv_float"] = float(movesense_data.hrv)
             
         self.add_to_influx_queue(influx_data)
 
