@@ -73,6 +73,30 @@ class IgnoreBrokenPipeHandler(logging.StreamHandler):
             except BrokenPipeError:
                 pass
 
+class RSSSFilter(logging.Filter):
+    """Filter to block excessive RSSI and D-Bus property change logging"""
+    def filter(self, record):
+        message = record.getMessage().lower()
+        logger_name = record.name.lower()
+        
+        # Filter out common RSSI and property change spam
+        noise_patterns = [
+            'rssi', 'txpower', 'properties changed', 'property changed',
+            'get_property', 'propertieschaged', 'txpoweradv',
+            'advertisements received', 'signal strength', 'propertychanged',
+            'propertieschanged', 'get_all', 'introspect'
+        ]
+        
+        # Also filter based on logger names that are known to be noisy
+        noisy_loggers = ['dbus', 'bleak.backends', 'bluez']
+        
+        # Block if message contains noise patterns OR if it's from a noisy logger at DEBUG level
+        has_noise_pattern = any(pattern in message for pattern in noise_patterns)
+        is_noisy_logger_debug = (record.levelno == logging.DEBUG and 
+                                any(noisy in logger_name for noisy in noisy_loggers))
+        
+        return not (has_noise_pattern or is_noisy_logger_debug)
+
 class ColoredConsoleFormatter(logging.Formatter):
     def format(self, record):
         if record.levelno == logging.WARNING:
@@ -104,6 +128,24 @@ logging.basicConfig(
     format='%(asctime)s - %(name)-20s - %(levelname)-8s - %(message)s',
     handlers=[stdout_handler, memory_handler]
 )
+
+# Reduce logging verbosity for noisy external libraries
+# This fixes the high CPU usage from excessive D-Bus logging
+logging.getLogger('bleak').setLevel(logging.WARNING)
+logging.getLogger('bleak.backends').setLevel(logging.WARNING)
+logging.getLogger('bleak.backends.bluezdbus').setLevel(logging.WARNING)
+logging.getLogger('bleak.backends.bluezdbus.client').setLevel(logging.WARNING)
+logging.getLogger('bleak.backends.bluezdbus.manager').setLevel(logging.WARNING)
+logging.getLogger('bleak.backends.bluezdbus.scanner').setLevel(logging.WARNING)
+logging.getLogger('dbus').setLevel(logging.WARNING)
+logging.getLogger('dbus.connection').setLevel(logging.WARNING)
+logging.getLogger('dbus.proxies').setLevel(logging.WARNING)
+
+# Add RSSI filter to reduce signal strength logging noise
+rssi_filter = RSSSFilter()
+stdout_handler.addFilter(rssi_filter)
+memory_handler.addFilter(rssi_filter)
+logging.getLogger().addFilter(rssi_filter)
 
 # Function to set log level
 def set_log_level(level):
